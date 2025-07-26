@@ -14,7 +14,6 @@ func SummonerSummaryMixer(d models.SummonerDAO) SummonerSummaryVO {
 		ProfileIconId: d.ProfileIconId,
 		GameName:      d.GameName,
 		TagLine:       d.TagLine,
-		Name:          d.Name,
 		Puuid:         d.Puuid,
 		SummonerLevel: d.SummonerLevel,
 		LastUpdatedAt: d.LastUpdatedAt,
@@ -204,7 +203,7 @@ func SummonerMatchSummaryMixer(d models.MatchDAO, matchAvgTierRank *SummonerRank
 	}
 }
 
-func IngameParticipantMixer(d api.SpectatorParticipantDto) IngameParticipantVO {
+func IngameParticipantMixer(d api.SpectatorV5ParticipantDto) IngameParticipantVO {
 	return IngameParticipantVO{
 		ChampionId:    d.ChampionId,
 		ProfileIconId: d.ProfileIconId,

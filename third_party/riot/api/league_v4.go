@@ -8,8 +8,7 @@ import (
 
 type LeagueItemDto struct {
 	LeagueId     string `json:"leagueId"`
-	SummonerId   string `json:"summonerId"`
-	SummonerName string `json:"summonerName"`
+	Puuid        string `json:"puuid"`
 	QueueType    string `json:"queueType"`
 	Tier         string `json:"tier"`
 	Rank         string `json:"rank"`
@@ -30,10 +29,10 @@ type LeagueItemDto struct {
 
 type LeagueDto []LeagueItemDto
 
-func GetLeaguesBySummonerId(summonerId string) (*LeagueDto, error) {
+func GetLeaguesByPuuid(puuid string) (*LeagueDto, error) {
 	riot.UpdateRiotApiCalls()
 	resp, err := http.Get(http.GetRequest{
-		Url: riot.CreateUrl(riot.RegionKr, "/lol/league/v4/entries/by-summoner/"+summonerId),
+		Url: riot.CreateUrl(riot.RegionKr, "/lol/league/v4/entries/by-puuid/"+puuid),
 	})
 	if err != nil {
 		return nil, err

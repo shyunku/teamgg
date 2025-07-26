@@ -101,7 +101,7 @@ func (de *DataExplorer) fetchNewSummoner() (bool, error) {
 	}
 
 	// get summoner rank
-	if err := RenewSummonerLeague(tx, summonerDAO.Id, summonerDAO.Puuid); err != nil {
+	if err := RenewSummonerLeague(tx, summonerDAO.Puuid); err != nil {
 		log.Error(err)
 		_ = tx.Rollback()
 		return true, err
@@ -118,7 +118,7 @@ func (de *DataExplorer) fetchNewSummoner() (bool, error) {
 	}
 
 	// get summoner mastery
-	if err := RenewSummonerMastery(tx, summonerDAO.Id, summonerDAO.Puuid); err != nil {
+	if err := RenewSummonerMastery(tx, summonerDAO.Puuid); err != nil {
 		log.Error(err)
 		_ = tx.Rollback()
 		return true, err

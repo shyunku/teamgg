@@ -13,20 +13,6 @@ import (
 
 // vo_getters configure vo with VAO and mixed-VAO (null-safe)
 
-func GetSummonerSummaryVO_byName(summonerName string) (*SummonerSummaryVO, error) {
-	// find summoner by name on db
-	summonerDao, exists, err := models.GetSummonerDAO_byName(db.Root, summonerName)
-	if err != nil {
-		log.Error(err)
-		return nil, err
-	}
-	if !exists {
-		return nil, fmt.Errorf("summoner dao not found with name (%s)", summonerName)
-	}
-	summonerVo := SummonerSummaryMixer(*summonerDao)
-	return &summonerVo, nil
-}
-
 func GetSummonerSummaryVO_byPuuid(puuid string) (*SummonerSummaryVO, error) {
 	if core.DebugOnProd {
 		defer util.InspectFunctionExecutionTime()()

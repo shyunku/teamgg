@@ -1567,7 +1567,7 @@ func RenewRanks(c *gin.Context) {
 		}
 
 		// get rank info
-		if err := service.RenewSummonerLeague(tx, summonerDAO.Id, summonerDAO.Puuid); err != nil {
+		if err := service.RenewSummonerLeague(tx, summonerDAO.Puuid); err != nil {
 			log.Error(err)
 			_ = tx.Rollback()
 			util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
@@ -1575,7 +1575,7 @@ func RenewRanks(c *gin.Context) {
 		}
 
 		// get mastery info
-		if err := service.RenewSummonerMastery(tx, summonerDAO.Id, summonerDAO.Puuid); err != nil {
+		if err := service.RenewSummonerMastery(tx, summonerDAO.Puuid); err != nil {
 			log.Error(err)
 			_ = tx.Rollback()
 			util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")

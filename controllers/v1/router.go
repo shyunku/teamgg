@@ -370,7 +370,7 @@ func GetIngameInfo(c *gin.Context) {
 		return
 	}
 
-	spectatorInfo, status, err := api.GetSpectatorInfo(summonerDAO.Id)
+	spectatorInfo, status, err := api.GetSpectatorInfoV5(summonerDAO.Puuid)
 	if err != nil {
 		if status == http.StatusNotFound {
 			util.AbortWithStrJson(c, http.StatusNotFound, "not in game")

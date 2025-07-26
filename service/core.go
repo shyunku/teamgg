@@ -33,13 +33,13 @@ func RenewSummonerTotal(tx *sqlx.Tx, puuid string) error {
 	}
 
 	// update summoner league
-	if err := RenewSummonerLeague(tx, summonerDAO.Id, summonerDAO.Puuid); err != nil {
+	if err := RenewSummonerLeague(tx, summonerDAO.Puuid); err != nil {
 		log.Error(err)
 		return err
 	}
 
 	// update summoner mastery
-	if err := RenewSummonerMastery(tx, summonerDAO.Id, summonerDAO.Puuid); err != nil {
+	if err := RenewSummonerMastery(tx, summonerDAO.Puuid); err != nil {
 		log.Error(err)
 		return err
 	}
@@ -84,17 +84,13 @@ func RenewSummonerInfoByPuuid(db db.Context, puuid string) (*models.SummonerDAO,
 func renewSummonerInfo(db db.Context, summoner *api.SummonerDto, account *api.AccountByRiotIdDto) (*models.SummonerDAO, error) {
 	// make new summoner DAO
 	summonerDao := &models.SummonerDAO{
-		AccountId:       summoner.AccountId,
 		ProfileIconId:   summoner.ProfileIconId,
 		RevisionDate:    summoner.RevisionDate,
 		GameName:        account.GameName,
 		TagLine:         account.TagLine,
-		Name:            summoner.Name,
-		Id:              summoner.Id,
 		Puuid:           summoner.Puuid,
 		SummonerLevel:   summoner.SummonerLevel,
 		ShortenGameName: util.ShortenSummonerName(account.GameName),
-		ShortenName:     util.ShortenSummonerName(summoner.Name),
 		LastUpdatedAt:   time.Now(),
 	}
 
@@ -109,17 +105,17 @@ func renewSummonerInfo(db db.Context, summoner *api.SummonerDto, account *api.Ac
 
 // RenewSummonerLeague updates summoner league info
 // this assumes that summoner info is already stored in this context.
-func RenewSummonerLeague(db db.Context, summonerId string, puuid string) error {
-	leagues, err := api.GetLeaguesBySummonerId(summonerId)
+func RenewSummonerLeague(db db.Context, puuid string) error {
+	leagues, err := api.GetLeaguesByPuuid(puuid)
 	if err != nil {
-		log.Warnf("failed to get league by summoner id (%s) - %s", summonerId, puuid)
+		log.Warnf("failed to get league by puuid (%s)", puuid)
 		return err
 	}
 
 	for _, league := range *leagues {
-		if league.SummonerId != summonerId {
-			log.Errorf("league summoner id (%s) != summoner id (%s)", league.SummonerId, summonerId)
-			return errors.New("league summoner id is not equal to summoner id")
+		if league.Puuid != puuid {
+			log.Errorf("league puuid (%s) != puuid (%s)", league.Puuid, puuid)
+			return errors.New("league puuid is not equal to puuid")
 		}
 
 		// create new league
@@ -152,10 +148,10 @@ func RenewSummonerLeague(db db.Context, summonerId string, puuid string) error {
 	return nil
 }
 
-func RenewSummonerMastery(db db.Context, summonerId string, puuid string) error {
+func RenewSummonerMastery(db db.Context, puuid string) error {
 	masteries, err := api.GetMasteryByPuuid(puuid)
 	if err != nil {
-		log.Warnf("failed to get mastery by summoner id (%s)", summonerId)
+		log.Warnf("failed to get mastery by puuid (%s)", puuid)
 		return err
 	}
 
