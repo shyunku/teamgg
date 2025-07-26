@@ -14,7 +14,7 @@ const (
 	LoadInitialMatchCountDev = 10
 	LoadMoreMatchCountDev    = 5
 
-	DataExplorerLoopPeriod       = 3 * time.Second
+	DataExplorerLoopPeriod       = 24 * time.Hour
 	DataExplorerLoopPeriodDev    = 5 * time.Minute
 	DataExplorerLoadMatchesCount = 3
 

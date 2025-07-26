@@ -6,7 +6,7 @@ import (
 )
 
 func Encode(query string) string {
-	return url.QueryEscape(query)
+	return url.PathEscape(query)
 }
 
 func CreateUrl(region string, path string) string {
