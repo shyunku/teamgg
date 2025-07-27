@@ -1,0 +1,1 @@
+nohup ./main > output.log &
