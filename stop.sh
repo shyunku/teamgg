@@ -1,1 +1,1 @@
-sudo supervisorctl stop team.gg-server
+pkill -f teamgg.sh
