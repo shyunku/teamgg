@@ -106,11 +106,11 @@ func UnsafeAuthMiddleware(c *gin.Context) {
 		c.Next()
 	}()
 
+	log.Infof("access_token: %s", accessToken)
+
 	if accessToken == "" {
 		return
 	}
-
-	log.Infof("access_token: %s", accessToken)
 
 	uid, err := auth.ValidateToken(accessToken, crypto.JwtAccessSecretKey)
 	if err != nil {
@@ -159,6 +159,8 @@ func UnsafeAuthMiddleware(c *gin.Context) {
 		}
 		util2.SetAccessTokenCookie(c, authTokenBundle.AccessToken.Token, int(refreshTokenExpireDuration.Seconds()))
 	}
+
+	log.Infof("uid: %s", uid)
 
 	c.Set("uid", uid)
 	c.Request.Header.Set("uid", uid)
