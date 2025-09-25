@@ -50,6 +50,7 @@ func GetCustomGameConfigurationList(c *gin.Context) {
 	uid := c.GetString("uid")
 
 	if uid == "" {
+		log.Warn("uid is empty")
 		util.AbortWithStrJson(c, http.StatusUnauthorized, "user not found")
 		return
 	}

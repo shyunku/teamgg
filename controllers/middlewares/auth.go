@@ -97,8 +97,11 @@ func UnsafeAuthMiddleware(c *gin.Context) {
 	}()
 
 	if err != nil {
+		log.Warn(err)
 		return
 	}
+
+	log.Infof("access_token: %s", accessToken)
 
 	uid, err := auth.ValidateToken(accessToken, crypto.JwtAccessSecretKey)
 	if err != nil {
