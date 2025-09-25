@@ -1,0 +1,1 @@
+go build -o teamgg ./main.go
