@@ -11,6 +11,7 @@ import (
 	util2 "team.gg-server/controllers/util"
 	"team.gg-server/core"
 	"team.gg-server/libs/auth"
+	"team.gg-server/libs/crypto"
 	"team.gg-server/libs/db"
 	"team.gg-server/models"
 	"team.gg-server/service"
@@ -22,6 +23,7 @@ func UseAuthRouter(r *gin.RouterGroup) {
 
 	g.POST("/login", Login)
 	g.POST("/signup", Signup)
+	g.POST("/refresh", Refresh)
 	g.POST("/logout", Logout)
 	g.GET("/rsoLogin", RsoLogin)
 	g.GET("/rsoLogout", RsoLogout)
@@ -62,17 +64,20 @@ func Login(c *gin.Context) {
 	}
 
 	// save on cookie
-	refreshTokenExpireDuration, err := auth.GetRefreshTokenExpireDuration()
-	if err != nil {
-		log.Error(err)
-		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
-		return
-	}
-	util2.SetAccessTokenCookie(c, authTokenBundle.AccessToken.Token, int(refreshTokenExpireDuration.Seconds()))
+	//refreshTokenExpireDuration, err := auth.GetRefreshTokenExpireDuration()
+	//if err != nil {
+	//	log.Error(err)
+	//	util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
+	//	return
+	//}
+	//util2.SetAccessTokenCookie(c, authTokenBundle.AccessToken.Token, int(refreshTokenExpireDuration.Seconds()))
 
 	resp := LoginResponseDto{
-		Uid:    userDAO.Uid,
-		UserId: userDAO.UserId,
+		Uid:          userDAO.Uid,
+		UserId:       userDAO.UserId,
+		AccessToken:  authTokenBundle.AccessToken.Token,  // <-- 추가
+		RefreshToken: authTokenBundle.RefreshToken.Token, // <-- 추가(서버가 검증용으로 보관 중)
+		ExpiresIn:    int(authTokenBundle.AccessToken.ExpiresAt),
 	}
 
 	c.JSON(http.StatusOK, resp)
@@ -116,6 +121,49 @@ func Signup(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, nil)
+}
+
+func Refresh(c *gin.Context) {
+	var req struct {
+		RefreshToken string `json:"refreshToken"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.RefreshToken == "" {
+		c.AbortWithStatus(http.StatusBadRequest)
+		return
+	}
+
+	// 서버가 보관한 리프레시와 대조
+	uid, err := auth.ValidateToken(req.RefreshToken, crypto.JwtRefreshSecretKey)
+	if err != nil {
+		c.AbortWithStatus(http.StatusUnauthorized)
+		return
+	}
+
+	saved, err := auth.LoadRefreshToken(uid)
+	if err != nil || saved != req.RefreshToken {
+		c.AbortWithStatus(http.StatusUnauthorized)
+		return
+	}
+
+	// 새 토큰 발급
+	// (보안 정책에 따라 refresh 재발급/회전까지 하려면 추가)
+	bundle, err := auth.CreateAuthToken(uid)
+	if err != nil {
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
+
+	// 갱신 저장
+	if err := auth.SaveRefreshToken(uid, bundle.RefreshToken); err != nil {
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"accessToken":  bundle.AccessToken.Token,
+		"refreshToken": bundle.RefreshToken,
+		"expiresIn":    int(bundle.AccessToken.ExpiresAt),
+	})
 }
 
 func Logout(c *gin.Context) {

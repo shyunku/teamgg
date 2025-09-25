@@ -8,8 +8,11 @@ type LoginRequestDto struct {
 }
 
 type LoginResponseDto struct {
-	Uid    string `json:"uid"`
-	UserId string `json:"userId"`
+	Uid          string `json:"uid"`
+	UserId       string `json:"userId"`
+	AccessToken  string `json:"accessToken"`
+	RefreshToken string `json:"refreshToken"`
+	ExpiresIn    int    `json:"expiresIn"`
 }
 
 type SignupRequestDto struct {

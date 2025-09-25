@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 	log "github.com/shyunku-libraries/go-logger"
 	"net/http"
+	"strings"
 	util2 "team.gg-server/controllers/util"
 	"team.gg-server/libs/auth"
 	"team.gg-server/libs/crypto"
@@ -90,14 +91,22 @@ func AuthMiddleware(c *gin.Context) {
 }
 
 func UnsafeAuthMiddleware(c *gin.Context) {
-	accessToken, err := c.Cookie("accessToken")
+	authz := c.GetHeader("Authorization") // "Bearer <token>"
+	var accessToken string
+	if strings.HasPrefix(authz, "Bearer ") {
+		accessToken = strings.TrimPrefix(authz, "Bearer ")
+	} else {
+		// 보조: 쿠키도 시도 (파폭 데스크톱 임시 호환)
+		if v, err := c.Cookie("accessToken"); err == nil {
+			accessToken = v
+		}
+	}
 
 	defer func() {
 		c.Next()
 	}()
 
-	if err != nil {
-		log.Warn(err)
+	if accessToken == "" {
 		return
 	}
 
@@ -153,4 +162,22 @@ func UnsafeAuthMiddleware(c *gin.Context) {
 
 	c.Set("uid", uid)
 	c.Request.Header.Set("uid", uid)
+}
+
+func CORSMiddleware(allowed map[string]struct{}) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		origin := c.GetHeader("Origin")
+		if _, ok := allowed[origin]; ok {
+			c.Header("Access-Control-Allow-Origin", origin)
+			c.Header("Vary", "Origin")
+		}
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With") // <-- Authorization
+
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatus(204)
+			return
+		}
+		c.Next()
+	}
 }
