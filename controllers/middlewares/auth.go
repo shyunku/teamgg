@@ -106,7 +106,7 @@ func UnsafeAuthMiddleware(c *gin.Context) {
 		c.Next()
 	}()
 
-	log.Infof("access_token: %s", accessToken)
+	//log.Infof("access_token: %s", accessToken)
 
 	if accessToken == "" {
 		return
