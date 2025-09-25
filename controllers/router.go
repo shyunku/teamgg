@@ -33,13 +33,15 @@ func SetupRouter() *gin.Engine {
 		"https://www.team-gg.net",
 		"https://dwe4cvxze1hsa.cloudfront.net",
 	}
-	config.AllowCredentials = true
-	//config.AllowHeaders = []string{
-	//	"Origin",
-	//	"Content-Length",
-	//	"Content-Type",
-	//	"Authorization",
-	//}
+	config.AllowCredentials = false
+	config.AllowHeaders = []string{
+		"Origin",
+		"Content-Length",
+		"Content-Type",
+		"Authorization",
+		"X-Requested-With",
+		"Accept",
+	}
 
 	r := gin.Default()
 	r.Use(cors.New(config))

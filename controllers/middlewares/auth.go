@@ -169,12 +169,26 @@ func UnsafeAuthMiddleware(c *gin.Context) {
 func CORSMiddleware(allowed map[string]struct{}) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
-		if _, ok := allowed[origin]; ok {
-			c.Header("Access-Control-Allow-Origin", origin)
-			c.Header("Vary", "Origin")
+		if origin != "" {
+			if _, ok := allowed[origin]; ok {
+				c.Header("Access-Control-Allow-Origin", origin)
+			}
 		}
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With") // <-- Authorization
+
+		// 캐시/프록시 안전 (사전요청 캐시 분리)
+		c.Header("Vary", "Origin, Access-Control-Request-Method, Access-Control-Request-Headers")
+
+		// 허용 메서드
+		c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,PATCH,OPTIONS")
+
+		if rh := c.GetHeader("Access-Control-Request-Headers"); rh != "" {
+			c.Header("Access-Control-Allow-Headers", rh)
+		} else {
+			c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Requested-With")
+		}
+
+		// 쿠키를 안 쓰는 구조면 아래 라인은 불필요(남겨도 무해)
+		// c.Header("Access-Control-Allow-Credentials", "true")
 
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(204)
