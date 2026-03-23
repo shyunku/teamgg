@@ -5,3 +5,8 @@ datafiles/
 
 .main/
 output.log
+
+*.pid
+
+main
+teamgg
