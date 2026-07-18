@@ -32,14 +32,14 @@ const (
 	TeamPositionAdc     = "BOTTOM"
 	TeamPositionSupport = "UTILITY"
 
-	WeightLineFairness     = 0.36
-	WeightTierFairness     = 0.24
+	WeightLineFairness     = 0.20
+	WeightTierFairness     = 0.40
 	WeightLineSatisfaction = 1 - WeightLineFairness - WeightTierFairness
 
-	WeightTopInfluence     = 0.14
-	WeightJungleInfluence  = 0.23
-	WeightMidInfluence     = 0.25
-	WeightAdcInfluence     = 0.21
+	WeightTopInfluence     = 0.20
+	WeightJungleInfluence  = 0.20
+	WeightMidInfluence     = 0.20
+	WeightAdcInfluence     = 0.20
 	WeightSupportInfluence = 1 - WeightTopInfluence - WeightJungleInfluence - WeightMidInfluence - WeightAdcInfluence
 
 	QueueTypeAll         = 0   // 전체

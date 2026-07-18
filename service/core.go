@@ -774,155 +774,100 @@ func FindBalancedCustomGameConfig(
 func calculateCustomGameConfigFairness(
 	teamParticipantMap map[string]CustomGameTeamParticipantVO,
 	weights CustomGameConfigurationWeightsVO) (*CustomGameConfigurationBalanceVO, error) {
-	// calculate line score
-	var team1LineScore float64 = 0
-	var team2LineScore float64 = 0
+	teamRating := map[int]float64{1: 0, 2: 0}
+	positionRating := make(map[string]map[int]float64)
+	positionOccupied := make(map[string]map[int]bool)
+	for _, position := range GetSupportedPositions {
+		positionRating[position] = map[int]float64{1: 0, 2: 0}
+		positionOccupied[position] = map[int]bool{1: false, 2: false}
+	}
 
-	var team1TierScore float64 = 0
-	var team2TierScore float64 = 0
-
-	// calculate each line score
-	var team1TopScore float64 = 0
-	var team1JungleScore float64 = 0
-	var team1MidScore float64 = 0
-	var team1AdcScore float64 = 0
-	var team1SupportScore float64 = 0
-	var team2TopScore float64 = 0
-	var team2JungleScore float64 = 0
-	var team2MidScore float64 = 0
-	var team2AdcScore float64 = 0
-	var team2SupportScore float64 = 0
-
-	var lineSatisfaction float64 = 0
-
-	favorWeight := func(favor int) float64 {
+	satisfactionValue := func(favor int) float64 {
 		switch favor {
 		case -1:
-			return 0.0
+			return 0
 		case 0:
-			return 1.0
+			return 1.0 / 3.0
 		case 1:
-			return 2.0
+			return 2.0 / 3.0
 		case 2:
-			return 4.0
+			return 1
 		default:
-			return 0.0
+			return 0
 		}
 	}
 
+	lineSatisfactionSum := 0.0
+	participantCount := 0
 	for _, participant := range teamParticipantMap {
-		//log.Debugf("team %d - %s: %s", participant.Team, participant.Position, participant.Summary.GameName)
-		var score float64 = 0
+		if participant.Team != 1 && participant.Team != 2 {
+			continue
+		}
+		if _, supported := positionRating[participant.Position]; !supported {
+			continue
+		}
+
+		rating := float64(participant.GetRepresentativeRatingPoint())
+		teamRating[participant.Team] += rating
+		positionRating[participant.Position][participant.Team] = rating
+		positionOccupied[participant.Position][participant.Team] = true
+		participantCount++
+
+		favor := 0
 		switch participant.Position {
 		case types.PositionTop:
-			lineSatisfaction += favorWeight(participant.PositionFavor.Top)
-			score = favorWeight(participant.PositionFavor.Top) * float64(participant.GetRepresentativeRatingPoint()) * weights.TopInfluence
-			if participant.Team == 1 {
-				team1TopScore = score
-			} else {
-				team2TopScore = score
-			}
+			favor = participant.PositionFavor.Top
 		case types.PositionJungle:
-			lineSatisfaction += favorWeight(participant.PositionFavor.Jungle)
-			score = favorWeight(participant.PositionFavor.Jungle) * float64(participant.GetRepresentativeRatingPoint()) * weights.JungleInfluence
-			if participant.Team == 1 {
-				team1JungleScore = score
-			} else {
-				team2JungleScore = score
-			}
+			favor = participant.PositionFavor.Jungle
 		case types.PositionMid:
-			lineSatisfaction += favorWeight(participant.PositionFavor.Mid)
-			score = favorWeight(participant.PositionFavor.Mid) * float64(participant.GetRepresentativeRatingPoint()) * weights.MidInfluence
-			if participant.Team == 1 {
-				team1MidScore = score
-			} else {
-				team2MidScore = score
-			}
+			favor = participant.PositionFavor.Mid
 		case types.PositionAdc:
-			lineSatisfaction += favorWeight(participant.PositionFavor.Adc)
-			score = favorWeight(participant.PositionFavor.Adc) * float64(participant.GetRepresentativeRatingPoint()) * weights.AdcInfluence
-			if participant.Team == 1 {
-				team1AdcScore = score
-			} else {
-				team2AdcScore = score
-			}
+			favor = participant.PositionFavor.Adc
 		case types.PositionSupport:
-			lineSatisfaction += favorWeight(participant.PositionFavor.Support)
-			score = favorWeight(participant.PositionFavor.Support) * float64(participant.GetRepresentativeRatingPoint()) * weights.SupportInfluence
-			if participant.Team == 1 {
-				team1SupportScore = score
-			} else {
-				team2SupportScore = score
-			}
+			favor = participant.PositionFavor.Support
 		}
-
-		if participant.Team == 1 {
-			team1LineScore += score
-			team1TierScore += float64(participant.GetRepresentativeRatingPoint())
-		} else {
-			team2LineScore += score
-			team2TierScore += float64(participant.GetRepresentativeRatingPoint())
-		}
+		lineSatisfactionSum += satisfactionValue(favor)
 	}
 
-	// positive: team1 is better
-	topScoreDiff := math.Abs(team1TopScore - team2TopScore)
-	jungleScoreDiff := math.Abs(team1JungleScore - team2JungleScore)
-	midScoreDiff := math.Abs(team1MidScore - team2MidScore)
-	//adcScoreDiff := math.Abs(team1AdcScore - team2AdcScore)
-	//supportScoreDiff := math.Abs(team1SupportScore - team2SupportScore)
-	team1BottomScore := (team1AdcScore*weights.AdcInfluence + team1SupportScore*weights.SupportInfluence) / (weights.AdcInfluence + weights.SupportInfluence)
-	team2BottomScore := (team2AdcScore*weights.AdcInfluence + team2SupportScore*weights.SupportInfluence) / (weights.AdcInfluence + weights.SupportInfluence)
-	bottomScoreDiff := math.Abs(team1BottomScore - team2BottomScore)
-
-	var lineScoreDiffSum float64 = 0
-	lineScoreDiffSum += math.Pow(topScoreDiff, 2.0)
-	lineScoreDiffSum += math.Pow(jungleScoreDiff, 2.0)
-	lineScoreDiffSum += math.Pow(midScoreDiff, 2.0)
-	//lineScoreDiffSum += math.Pow(adcScoreDiff, 2.0)
-	//lineScoreDiffSum += math.Pow(supportScoreDiff, 2.0)
-	lineScoreDiffSum += math.Pow(bottomScoreDiff, 2.0)
-
-	// regularize (0~inf) -> (0~1)
-	var lineFairness float64 = 0
-	lineScoreDiffSum = math.Sqrt(lineScoreDiffSum)
-	if team1LineScore == 0 || team2LineScore == 0 {
-		lineFairness = 0
-	} else {
-		lineFairness = util.LogisticNormalize(lineScoreDiffSum, 700)
+	balanceRatio := func(a, b float64) float64 {
+		if a == 0 && b == 0 {
+			return 1
+		}
+		return math.Min(a, b) / math.Max(a, b)
 	}
-	//log.Debugf("Line fairness: %.5f, score: %.5f", lineScoreDiffSum, lineFairness)
 
-	// regularize line satisfaction (0~20) * 2 -> (0~1) -> (0~1) (biased to 1)
-	lineSatisfactionScore := math.Sqrt(lineSatisfaction / 40.0)
-	//log.Debugf("Line satisfaction: %.5f, score: %.5f", lineSatisfaction, lineSatisfactionScore)
-
-	// calculate tierFairness
-	var tierFairness float64 = 0
-	tierScoreDiff := math.Abs(team1TierScore - team2TierScore)
-	maxTierScore := math.Max(team1TierScore, team2TierScore)
-	if maxTierScore != 0 {
-		tierScoreDiffRate := tierScoreDiff / maxTierScore
-		if tierScoreDiffRate == 1 {
-			tierFairness = 0
-		} else {
-			scaledDiffRate := util.PolynomialToInfiniteScale(tierScoreDiffRate)
-			tierFairness = util.LogisticNormalize(scaledDiffRate, 0.35)
+	lineFairnessSum := 0.0
+	activePositionCount := 0
+	for _, position := range GetSupportedPositions {
+		team1Occupied := positionOccupied[position][1]
+		team2Occupied := positionOccupied[position][2]
+		if !team1Occupied && !team2Occupied {
+			continue
+		}
+		activePositionCount++
+		if team1Occupied && team2Occupied {
+			lineFairnessSum += balanceRatio(positionRating[position][1], positionRating[position][2])
 		}
 	}
+	lineFairness := 0.0
+	if activePositionCount > 0 {
+		lineFairness = lineFairnessSum / float64(activePositionCount)
+	}
 
-	totalFairness := lineFairness*weights.LineFairness + tierFairness*weights.TierFairness + lineSatisfactionScore*weights.LineSatisfaction
+	teamFairness := balanceRatio(teamRating[1], teamRating[2])
+	lineSatisfaction := 0.0
+	if participantCount > 0 {
+		lineSatisfaction = lineSatisfactionSum / float64(participantCount)
+	}
 
-	//log.Debugf("team1 top: %.5f, jungle: %.5f, mid: %.5f, adc: %.5f, support: %.5f", team1TopScore, team1JungleScore, team1MidScore, team1AdcScore, team1SupportScore)
-	//log.Debugf("team2 top: %.5f, jungle: %.5f, mid: %.5f, adc: %.5f, support: %.5f", team2TopScore, team2JungleScore, team2MidScore, team2AdcScore, team2SupportScore)
-	//log.Debugf("line fairness: %.5f, tier fairness: %.5f, total fairness: %.5f", lineFairness, tierFairness, totalFairness)
-
-	//log.Debugf("line satisfaction: %.5f, line satisfaction score: %.5f", lineSatisfaction, lineSatisfactionScore)
+	totalFairness := teamFairness*weights.TierFairness +
+		lineFairness*weights.LineFairness +
+		lineSatisfaction*weights.LineSatisfaction
 	return &CustomGameConfigurationBalanceVO{
 		Fairness:         totalFairness,
 		LineFairness:     lineFairness,
-		TierFairness:     tierFairness,
-		LineSatisfaction: lineSatisfactionScore,
+		TierFairness:     teamFairness,
+		LineSatisfaction: lineSatisfaction,
 	}, nil
 }
 

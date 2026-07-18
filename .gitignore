@@ -1,5 +1,7 @@
 .env
 
+.temp/
+
 .idea/
 datafiles/
 
@@ -10,3 +12,4 @@ output.log
 
 main
 teamgg
+teamgg.exe

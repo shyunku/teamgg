@@ -1035,36 +1035,26 @@ func OptimizeCustomGameConfiguration(c *gin.Context) {
 		return
 	}
 
-	if req.LineFairnessWeight == nil || *req.LineFairnessWeight < 0 || *req.LineFairnessWeight > 1 {
-		util.AbortWithStrJson(c, http.StatusBadRequest, "invalid line fairness weight")
-		return
+	weights := []*float64{
+		req.LineFairnessWeight,
+		req.TierFairnessWeight,
+		req.LineSatisfactionWeight,
 	}
-	if req.TopInfluenceWeight == nil || *req.TopInfluenceWeight < 0 || *req.TopInfluenceWeight > 1 {
-		util.AbortWithStrJson(c, http.StatusBadRequest, "invalid top influence weight")
-		return
+	for _, weight := range weights {
+		if weight == nil || *weight < 0 || *weight > 1 {
+			util.AbortWithStrJson(c, http.StatusBadRequest, "invalid balance weight")
+			return
+		}
 	}
-	if req.JungleInfluenceWeight == nil || *req.JungleInfluenceWeight < 0 || *req.JungleInfluenceWeight > 1 {
-		util.AbortWithStrJson(c, http.StatusBadRequest, "invalid jungle influence weight")
-		return
-	}
-	if req.MidInfluenceWeight == nil || *req.MidInfluenceWeight < 0 || *req.MidInfluenceWeight > 1 {
-		util.AbortWithStrJson(c, http.StatusBadRequest, "invalid mid influence weight")
-		return
-	}
-	if req.AdcInfluenceWeight == nil || *req.AdcInfluenceWeight < 0 || *req.AdcInfluenceWeight > 1 {
-		util.AbortWithStrJson(c, http.StatusBadRequest, "invalid adc influence weight")
+	weightSum := *req.LineFairnessWeight + *req.TierFairnessWeight + *req.LineSatisfactionWeight
+	if weightSum < 0.999999 || weightSum > 1.000001 {
+		util.AbortWithStrJson(c, http.StatusBadRequest, "balance weights must sum to 1")
 		return
 	}
 
 	customGameConfigurationDAO.LineFairnessWeight = *req.LineFairnessWeight
 	customGameConfigurationDAO.TierFairnessWeight = *req.TierFairnessWeight
-	customGameConfigurationDAO.LineSatisfactionWeight = 1 - *req.LineFairnessWeight - *req.TierFairnessWeight
-	customGameConfigurationDAO.TopInfluenceWeight = *req.TopInfluenceWeight
-	customGameConfigurationDAO.JungleInfluenceWeight = *req.JungleInfluenceWeight
-	customGameConfigurationDAO.MidInfluenceWeight = *req.MidInfluenceWeight
-	customGameConfigurationDAO.AdcInfluenceWeight = *req.AdcInfluenceWeight
-	customGameConfigurationDAO.SupportInfluenceWeight = 1 - *req.TopInfluenceWeight - *req.JungleInfluenceWeight - *req.MidInfluenceWeight - *req.AdcInfluenceWeight
-
+	customGameConfigurationDAO.LineSatisfactionWeight = *req.LineSatisfactionWeight
 	if err := customGameConfigurationDAO.Upsert(tx); err != nil {
 		log.Error(err)
 		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
