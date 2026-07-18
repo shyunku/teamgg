@@ -34,3 +34,24 @@ func TestServerVersion(t *testing.T) {
 		t.Fatalf("body: got %+v, want version=%q isProduction=false", response, core.Version)
 	}
 }
+
+func TestCorsUsesCurrentTeamGgDomain(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := SetupRouter()
+
+	allowed := httptest.NewRecorder()
+	allowedRequest := httptest.NewRequest(http.MethodGet, "/", nil)
+	allowedRequest.Header.Set("Origin", "https://teamgg.kr")
+	router.ServeHTTP(allowed, allowedRequest)
+	if got := allowed.Header().Get("Access-Control-Allow-Origin"); got != "https://teamgg.kr" {
+		t.Fatalf("allowed origin: got %q", got)
+	}
+
+	removed := httptest.NewRecorder()
+	removedRequest := httptest.NewRequest(http.MethodGet, "/", nil)
+	removedRequest.Header.Set("Origin", "https://team-gg.net")
+	router.ServeHTTP(removed, removedRequest)
+	if removed.Code != http.StatusForbidden {
+		t.Fatalf("removed origin status: got %d, want %d", removed.Code, http.StatusForbidden)
+	}
+}
