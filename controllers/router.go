@@ -46,6 +46,7 @@ func SetupRouter() *gin.Engine {
 	r := gin.Default()
 	r.Use(cors.New(config))
 	r.Use(middlewares.DefaultMiddleware)
+	r.GET("/", serverVersion)
 	r.GET("/ping", ping)
 
 	// platform routes
@@ -61,6 +62,13 @@ func SetupRouter() *gin.Engine {
 	})
 
 	return r
+}
+
+func serverVersion(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"version":      core.Version,
+		"isProduction": !core.DebugMode,
+	})
 }
 
 func ping(c *gin.Context) {

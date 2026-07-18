@@ -417,6 +417,22 @@ create table teamgg.users
         unique (user_id)
 );
 
+create table teamgg.user_identities
+(
+    provider         varchar(32)  not null,
+    provider_subject varchar(255) not null,
+    uid              varchar(255) not null,
+    display_name     varchar(255) not null,
+    created_at       datetime     not null,
+    updated_at       datetime     not null,
+    primary key (provider, provider_subject),
+    constraint user_identities_provider_uid_uindex
+        unique (provider, uid),
+    constraint user_identities_users_uid_fk
+        foreign key (uid) references teamgg.users (uid)
+            on update cascade on delete cascade
+);
+
 create table teamgg.custom_game_configurations
 (
     id                       varchar(255)            not null

@@ -18,6 +18,7 @@ import (
 	"team.gg-server/core"
 	"team.gg-server/libs/db"
 	"team.gg-server/libs/http"
+	"team.gg-server/models"
 	"team.gg-server/util"
 )
 
@@ -34,6 +35,10 @@ var (
 	PerkStyles     = make(map[int]PerkStyleInfoVO)        // key: perk style id
 
 	RootDatabaseInitializer = func(db *sqlx.DB) error {
+		if err := models.EnsureUserIdentityTable(db); err != nil {
+			return err
+		}
+
 		// find static data tables
 		var staticTierRankTable interface{}
 
