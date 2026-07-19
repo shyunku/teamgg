@@ -423,11 +423,11 @@ create table teamgg.user_identities
     provider_subject varchar(255) not null,
     uid              varchar(255) not null,
     display_name     varchar(255) not null,
+    is_primary       tinyint(1) default 0 not null,
     created_at       datetime     not null,
     updated_at       datetime     not null,
     primary key (provider, provider_subject),
-    constraint user_identities_provider_uid_uindex
-        unique (provider, uid),
+    index user_identities_provider_uid_index (provider, uid),
     constraint user_identities_users_uid_fk
         foreign key (uid) references teamgg.users (uid)
             on update cascade on delete cascade
@@ -475,6 +475,20 @@ create table teamgg.custom_game_candidates
         foreign key (custom_game_config_id) references teamgg.custom_game_configurations (id)
             on update cascade on delete cascade,
     constraint custom_game_candidates_summoners_puuid_fk
+        foreign key (puuid) references teamgg.summoners (puuid)
+            on update cascade on delete cascade
+);
+
+create table teamgg.riot_custom_game_preferences
+(
+    puuid          varchar(255)  not null primary key,
+    flavor_top     int default 0 not null,
+    flavor_jungle  int default 0 not null,
+    flavor_mid     int default 0 not null,
+    flavor_adc     int default 0 not null,
+    flavor_support int default 0 not null,
+    updated_at     datetime      not null,
+    constraint riot_custom_game_preferences_summoners_puuid_fk
         foreign key (puuid) references teamgg.summoners (puuid)
             on update cascade on delete cascade
 );

@@ -29,6 +29,7 @@ func UseAuthRouter(r *gin.RouterGroup) {
 	g.GET("/rsoLogout", RsoLogout)
 	g.GET("/me", GetMyAccount)
 	g.DELETE("/me/riot", UnlinkRiotAccount)
+	g.PUT("/me/riot/primary", SetPrimaryRiotAccount)
 }
 
 func Login(c *gin.Context) {

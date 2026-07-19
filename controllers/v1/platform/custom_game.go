@@ -32,6 +32,66 @@ var (
 	pendingSummonerMatchesRefresh sync.Map
 )
 
+func beginCustomGameConfigurationMutation(c *gin.Context, configId string) bool {
+	if service.TryBeginCustomGameConfigurationMutation(configId) {
+		return true
+	}
+	util.AbortWithStrJson(c, http.StatusLocked, "최적의 조합을 계산 중이라 내전 구성을 변경할 수 없습니다.")
+	return false
+}
+
+func canEditCustomGameCandidatePreference(database db.Context, configId, puuid, uid string) (bool, error) {
+	permitted, err := service.CheckPermissionForCustomGameConfig(database, configId, uid)
+	if err != nil || permitted {
+		return permitted, err
+	}
+	ownedPuuids, err := getUserRiotPuuids(database, uid)
+	if err != nil {
+		return false, err
+	}
+	for _, ownedPuuid := range ownedPuuids {
+		if ownedPuuid == puuid {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// RSO's account subject is not guaranteed to be the same identifier stored by
+// the LoL summoner APIs. Resolve the current Riot ID to the summoner PUUID too.
+func getUserRiotPuuids(database db.Context, uid string) ([]string, error) {
+	identities, err := models.GetUserIdentityDAOs_byUid(database, models.UserIdentityProviderRiot, uid)
+	if err != nil {
+		return nil, err
+	}
+	puuidSet := make(map[string]struct{}, len(identities)*2)
+	for _, identity := range identities {
+		if identity.ProviderSubject != "" {
+			puuidSet[identity.ProviderSubject] = struct{}{}
+		}
+		separator := strings.LastIndex(identity.DisplayName, "#")
+		if separator <= 0 || separator >= len(identity.DisplayName)-1 {
+			continue
+		}
+		summoner, exists, err := models.GetSummonerDAO_byNameTag(
+			database,
+			identity.DisplayName[:separator],
+			identity.DisplayName[separator+1:],
+		)
+		if err != nil {
+			return nil, err
+		}
+		if exists {
+			puuidSet[summoner.Puuid] = struct{}{}
+		}
+	}
+	puuids := make([]string, 0, len(puuidSet))
+	for puuid := range puuidSet {
+		puuids = append(puuids, puuid)
+	}
+	return puuids, nil
+}
+
 func queueSummonerMatchesRefresh(configId, puuid string) {
 	jobKey := configId + ":" + puuid
 	if _, loaded := pendingSummonerMatchesRefresh.LoadOrStore(jobKey, struct{}{}); loaded {
@@ -44,10 +104,13 @@ func queueSummonerMatchesRefresh(configId, puuid string) {
 				key := job.configId + ":" + job.puuid
 				if err := service.RenewSummonerMatches(db.Root, job.puuid, nil); err != nil {
 					log.Warnf("background match refresh failed: %v", err)
-				} else if err := service.RecalculateCustomGameBalance(db.Root, job.configId); err != nil {
-					log.Warnf("background custom game balance refresh failed: %v", err)
-				} else {
-					socket.SocketIO.BroadcastToCustomConfigRoom(job.configId, socket.EventCustomConfigUpdated, nil)
+				} else if service.TryBeginCustomGameConfigurationMutation(job.configId) {
+					if err := service.RecalculateCustomGameBalance(db.Root, job.configId); err != nil {
+						log.Warnf("background custom game balance refresh failed: %v", err)
+					} else {
+						socket.SocketIO.BroadcastToCustomConfigRoom(job.configId, socket.EventCustomConfigUpdated, nil)
+					}
+					service.EndCustomGameConfigurationMutation(job.configId)
 				}
 				pendingSummonerMatchesRefresh.Delete(key)
 			}
@@ -79,6 +142,8 @@ func UseCustomGameRouter(r *gin.RouterGroup) {
 	g.POST("/arrange", ArrangeCustomGameParticipant)
 	g.POST("/unarrange", UnarrangeCustomGameParticipant)
 	g.POST("/favor-position", SetCustomGameParticipantFavorPosition)
+	g.POST("/default-favor-position", SaveCustomGameDefaultFavorPosition)
+	g.POST("/reset-favor-position", ResetCustomGameFavorPositionToDefault)
 	g.POST("/custom-tier-rank", SetCustomGameCandidateCustomTierRank)
 	g.POST("/custom-color-label", SetCustomGameCandidateCustomColorLabel)
 	g.DELETE("/custom-color-label", DeleteCustomGameCandidateCustomColorLabel)
@@ -124,6 +189,15 @@ func GetCustomGameConfiguration(c *gin.Context) {
 		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
 		return
 	}
+	uid := c.GetString("uid")
+	resp.CanManage = resp.CreatorUid == uid
+	ownedPuuids, err := getUserRiotPuuids(db.Root, uid)
+	if err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "Riot 계정 연결 정보를 확인하지 못했습니다.")
+		return
+	}
+	resp.OwnedPuuids = ownedPuuids
 
 	c.JSON(http.StatusOK, resp)
 }
@@ -227,6 +301,10 @@ func UpdateCustomGameConfigurationName(c *gin.Context) {
 		util.AbortWithStrJson(c, http.StatusBadRequest, "invalid request")
 		return
 	}
+	if !beginCustomGameConfigurationMutation(c, req.Id) {
+		return
+	}
+	defer service.EndCustomGameConfigurationMutation(req.Id)
 
 	name := strings.TrimSpace(req.Name)
 	if name == "" || utf8.RuneCountInString(name) > 100 {
@@ -313,6 +391,10 @@ func AddCandidateToCustomGameConfiguration(c *gin.Context) {
 		util.AbortWithStrJson(c, http.StatusBadRequest, "invalid request")
 		return
 	}
+	if !beginCustomGameConfigurationMutation(c, req.CustomGameConfigId) {
+		return
+	}
+	defer service.EndCustomGameConfigurationMutation(req.CustomGameConfigId)
 
 	uid := c.GetString("uid")
 
@@ -428,6 +510,19 @@ func AddCandidateToCustomGameConfiguration(c *gin.Context) {
 		FlavorAdc:          0,
 		FlavorSupport:      0,
 	}
+	defaultPreference, hasDefaultPreference, err := models.GetRiotCustomGamePreferenceDAO_byPuuid(db.Root, summonerDAO.Puuid)
+	if err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "기본 포지션 선호도를 불러오지 못했습니다.")
+		return
+	}
+	if hasDefaultPreference {
+		newCandidateDAO.FlavorTop = defaultPreference.FlavorTop
+		newCandidateDAO.FlavorJungle = defaultPreference.FlavorJungle
+		newCandidateDAO.FlavorMid = defaultPreference.FlavorMid
+		newCandidateDAO.FlavorAdc = defaultPreference.FlavorAdc
+		newCandidateDAO.FlavorSupport = defaultPreference.FlavorSupport
+	}
 	if err := newCandidateDAO.Upsert(db.Root); err != nil {
 		log.Error(err)
 		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
@@ -453,6 +548,10 @@ func DeleteCandidateFromCustomGameConfiguration(c *gin.Context) {
 		util.AbortWithStrJson(c, http.StatusBadRequest, "invalid request")
 		return
 	}
+	if !beginCustomGameConfigurationMutation(c, req.CustomGameConfigId) {
+		return
+	}
+	defer service.EndCustomGameConfigurationMutation(req.CustomGameConfigId)
 
 	uid := c.GetString("uid")
 
@@ -517,6 +616,10 @@ func ArrangeCustomGameParticipant(c *gin.Context) {
 		util.AbortWithStrJson(c, http.StatusBadRequest, "invalid request")
 		return
 	}
+	if !beginCustomGameConfigurationMutation(c, req.CustomGameConfigId) {
+		return
+	}
+	defer service.EndCustomGameConfigurationMutation(req.CustomGameConfigId)
 
 	uid := c.GetString("uid")
 
@@ -663,6 +766,10 @@ func UnarrangeCustomGameParticipant(c *gin.Context) {
 		util.AbortWithStrJson(c, http.StatusBadRequest, "invalid request")
 		return
 	}
+	if !beginCustomGameConfigurationMutation(c, req.CustomGameConfigId) {
+		return
+	}
+	defer service.EndCustomGameConfigurationMutation(req.CustomGameConfigId)
 
 	uid := c.GetString("uid")
 
@@ -728,18 +835,22 @@ func SetCustomGameParticipantFavorPosition(c *gin.Context) {
 		util.AbortWithStrJson(c, http.StatusBadRequest, "invalid request")
 		return
 	}
+	if !beginCustomGameConfigurationMutation(c, req.CustomGameConfigId) {
+		return
+	}
+	defer service.EndCustomGameConfigurationMutation(req.CustomGameConfigId)
 
 	uid := c.GetString("uid")
 
-	// check if user is creator of custom game
-	permitted, err := service.CheckPermissionForCustomGameConfig(db.Root, req.CustomGameConfigId, uid)
+	// The configuration owner can edit everyone; linked Riot account owners can edit themselves.
+	permitted, err := canEditCustomGameCandidatePreference(db.Root, req.CustomGameConfigId, req.Puuid, uid)
 	if err != nil {
 		log.Error(err)
 		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
 		return
 	}
 	if !permitted {
-		util.AbortWithStrJson(c, http.StatusForbidden, "user is not creator of custom game")
+		util.AbortWithStrJson(c, http.StatusForbidden, "본인 Riot 계정의 포지션 선호도만 변경할 수 있습니다.")
 		return
 	}
 
@@ -818,6 +929,139 @@ func SetCustomGameParticipantFavorPosition(c *gin.Context) {
 	c.JSON(http.StatusOK, nil)
 }
 
+func SaveCustomGameDefaultFavorPosition(c *gin.Context) {
+	var req SaveCustomGameDefaultFavorPositionRequestDto
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.AbortWithStrJson(c, http.StatusBadRequest, "요청 정보를 확인해주세요.")
+		return
+	}
+	if !beginCustomGameConfigurationMutation(c, req.CustomGameConfigId) {
+		return
+	}
+	defer service.EndCustomGameConfigurationMutation(req.CustomGameConfigId)
+
+	uid := c.GetString("uid")
+	ownedPuuids, err := getUserRiotPuuids(db.Root, uid)
+	if err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "Riot 계정 연결 정보를 확인하지 못했습니다.")
+		return
+	}
+	isOwned := false
+	for _, ownedPuuid := range ownedPuuids {
+		if ownedPuuid == req.Puuid {
+			isOwned = true
+			break
+		}
+	}
+	if !isOwned {
+		util.AbortWithStrJson(c, http.StatusForbidden, "본인 Riot 계정의 선호도만 기본값으로 저장할 수 있습니다.")
+		return
+	}
+	candidate, exists, err := models.GetCustomGameCandidateDAO_byPuuid(db.Root, req.CustomGameConfigId, req.Puuid)
+	if err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "포지션 선호도를 확인하지 못했습니다.")
+		return
+	}
+	if !exists {
+		util.AbortWithStrJson(c, http.StatusNotFound, "이 구성에서 Riot 계정을 찾지 못했습니다.")
+		return
+	}
+	preference := models.RiotCustomGamePreferenceDAO{
+		Puuid: candidate.Puuid, FlavorTop: candidate.FlavorTop, FlavorJungle: candidate.FlavorJungle,
+		FlavorMid: candidate.FlavorMid, FlavorAdc: candidate.FlavorAdc,
+		FlavorSupport: candidate.FlavorSupport, UpdatedAt: time.Now(),
+	}
+	if err := preference.Upsert(db.Root); err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "기본 포지션 선호도를 저장하지 못했습니다.")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func ResetCustomGameFavorPositionToDefault(c *gin.Context) {
+	var req SaveCustomGameDefaultFavorPositionRequestDto
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.AbortWithStrJson(c, http.StatusBadRequest, "요청 정보를 확인해주세요.")
+		return
+	}
+	if !beginCustomGameConfigurationMutation(c, req.CustomGameConfigId) {
+		return
+	}
+	defer service.EndCustomGameConfigurationMutation(req.CustomGameConfigId)
+
+	uid := c.GetString("uid")
+	permitted, err := canEditCustomGameCandidatePreference(db.Root, req.CustomGameConfigId, req.Puuid, uid)
+	if err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "Riot 계정 연결 정보를 확인하지 못했습니다.")
+		return
+	}
+	if !permitted {
+		util.AbortWithStrJson(c, http.StatusForbidden, "본인 Riot 계정의 포지션 선호도만 초기화할 수 있습니다.")
+		return
+	}
+
+	tx, err := db.Root.BeginTxx(c, nil)
+	if err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "기본 포지션 선호도를 적용하지 못했습니다.")
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	candidate, exists, err := models.GetCustomGameCandidateDAO_byPuuid(tx, req.CustomGameConfigId, req.Puuid)
+	if err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "포지션 선호도를 확인하지 못했습니다.")
+		return
+	}
+	if !exists {
+		util.AbortWithStrJson(c, http.StatusNotFound, "이 구성에서 Riot 계정을 찾지 못했습니다.")
+		return
+	}
+
+	// A Riot account without a saved preference starts from the neutral default.
+	candidate.FlavorTop = 0
+	candidate.FlavorJungle = 0
+	candidate.FlavorMid = 0
+	candidate.FlavorAdc = 0
+	candidate.FlavorSupport = 0
+	preference, hasPreference, err := models.GetRiotCustomGamePreferenceDAO_byPuuid(tx, req.Puuid)
+	if err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "기본 포지션 선호도를 불러오지 못했습니다.")
+		return
+	}
+	if hasPreference {
+		candidate.FlavorTop = preference.FlavorTop
+		candidate.FlavorJungle = preference.FlavorJungle
+		candidate.FlavorMid = preference.FlavorMid
+		candidate.FlavorAdc = preference.FlavorAdc
+		candidate.FlavorSupport = preference.FlavorSupport
+	}
+	if err := candidate.Upsert(tx); err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "기본 포지션 선호도를 적용하지 못했습니다.")
+		return
+	}
+	if err := service.RecalculateCustomGameBalance(tx, req.CustomGameConfigId); err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "내전 밸런스를 다시 계산하지 못했습니다.")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "기본 포지션 선호도를 적용하지 못했습니다.")
+		return
+	}
+
+	socket.SocketIO.MulticastToCustomConfigRoom(req.CustomGameConfigId, uid, socket.EventCustomConfigUpdated, nil)
+	c.JSON(http.StatusOK, gin.H{"ok": true, "usedSavedDefault": hasPreference})
+}
+
 func SetCustomGameCandidateCustomTierRank(c *gin.Context) {
 	var req SetCustomGameCandidateCustomTierRankRequestDto
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -825,6 +1069,10 @@ func SetCustomGameCandidateCustomTierRank(c *gin.Context) {
 		util.AbortWithStrJson(c, http.StatusBadRequest, "invalid request")
 		return
 	}
+	if !beginCustomGameConfigurationMutation(c, req.CustomGameConfigId) {
+		return
+	}
+	defer service.EndCustomGameConfigurationMutation(req.CustomGameConfigId)
 
 	uid := c.GetString("uid")
 
@@ -914,6 +1162,10 @@ func SetCustomGameCandidateCustomColorLabel(c *gin.Context) {
 		util.AbortWithStrJson(c, http.StatusBadRequest, "invalid request")
 		return
 	}
+	if !beginCustomGameConfigurationMutation(c, req.CustomGameConfigId) {
+		return
+	}
+	defer service.EndCustomGameConfigurationMutation(req.CustomGameConfigId)
 
 	uid := c.GetString("uid")
 
@@ -1109,6 +1361,10 @@ func DeleteCustomGameCandidateCustomColorLabel(c *gin.Context) {
 		util.AbortWithStrJson(c, http.StatusBadRequest, "invalid request")
 		return
 	}
+	if !beginCustomGameConfigurationMutation(c, req.CustomGameConfigId) {
+		return
+	}
+	defer service.EndCustomGameConfigurationMutation(req.CustomGameConfigId)
 
 	uid := c.GetString("uid")
 
@@ -1160,15 +1416,8 @@ func OptimizeCustomGameConfiguration(c *gin.Context) {
 
 	uid := c.GetString("uid")
 
-	tx, err := db.Root.BeginTxx(c, nil)
-	if err != nil {
-		log.Error(err)
-		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
-		return
-	}
-
 	// check if user is creator of custom game
-	customGameConfigurationDAO, exists, err := models.GetCustomGameDAO_byId(tx, req.Id)
+	customGameConfigurationDAO, exists, err := models.GetCustomGameDAO_byId(db.Root, req.Id)
 	if err != nil {
 		log.Error(err)
 		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
@@ -1182,6 +1431,15 @@ func OptimizeCustomGameConfiguration(c *gin.Context) {
 		util.AbortWithStrJson(c, http.StatusForbidden, "user is not creator of custom game")
 		return
 	}
+	if !service.TryLockCustomGameConfigurationForOptimization(req.Id) {
+		util.AbortWithStrJson(c, http.StatusLocked, "다른 사용자가 내전 구성을 변경 중이거나 이미 조합을 계산하고 있습니다.")
+		return
+	}
+	defer func() {
+		service.UnlockCustomGameConfigurationForOptimization(req.Id)
+		socket.SocketIO.BroadcastToCustomConfigRoom(req.Id, socket.EventCustomConfigUpdated, nil)
+	}()
+	socket.SocketIO.BroadcastToCustomConfigRoom(req.Id, socket.EventCustomConfigUpdated, nil)
 
 	weights := []*float64{
 		req.LineFairnessWeight,
@@ -1199,6 +1457,14 @@ func OptimizeCustomGameConfiguration(c *gin.Context) {
 		util.AbortWithStrJson(c, http.StatusBadRequest, "balance weights must sum to 1")
 		return
 	}
+
+	tx, err := db.Root.BeginTxx(c, nil)
+	if err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
 
 	customGameConfigurationDAO.LineFairnessWeight = *req.LineFairnessWeight
 	customGameConfigurationDAO.TierFairnessWeight = *req.TierFairnessWeight
@@ -1306,6 +1572,10 @@ func SelectMaxCandidates(c *gin.Context) {
 		util.AbortWithStrJson(c, http.StatusBadRequest, "invalid request")
 		return
 	}
+	if !beginCustomGameConfigurationMutation(c, req.Id) {
+		return
+	}
+	defer service.EndCustomGameConfigurationMutation(req.Id)
 
 	uid := c.GetString("uid")
 
@@ -1424,6 +1694,10 @@ func UnarrangeAllParticipants(c *gin.Context) {
 		util.AbortWithStrJson(c, http.StatusBadRequest, "invalid request")
 		return
 	}
+	if !beginCustomGameConfigurationMutation(c, req.Id) {
+		return
+	}
+	defer service.EndCustomGameConfigurationMutation(req.Id)
 
 	uid := c.GetString("uid")
 
@@ -1488,6 +1762,10 @@ func SwapTeam(c *gin.Context) {
 		util.AbortWithStrJson(c, http.StatusBadRequest, "invalid request")
 		return
 	}
+	if !beginCustomGameConfigurationMutation(c, req.Id) {
+		return
+	}
+	defer service.EndCustomGameConfigurationMutation(req.Id)
 
 	uid := c.GetString("uid")
 
@@ -1567,6 +1845,10 @@ func ShuffleTeam(c *gin.Context) {
 		util.AbortWithStrJson(c, http.StatusBadRequest, "invalid request")
 		return
 	}
+	if !beginCustomGameConfigurationMutation(c, req.Id) {
+		return
+	}
+	defer service.EndCustomGameConfigurationMutation(req.Id)
 
 	uid := c.GetString("uid")
 
@@ -1653,6 +1935,10 @@ func RenewRanks(c *gin.Context) {
 		util.AbortWithStrJson(c, http.StatusBadRequest, "invalid request")
 		return
 	}
+	if !beginCustomGameConfigurationMutation(c, req.Id) {
+		return
+	}
+	defer service.EndCustomGameConfigurationMutation(req.Id)
 
 	uid := c.GetString("uid")
 

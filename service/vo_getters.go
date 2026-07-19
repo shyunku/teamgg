@@ -293,7 +293,9 @@ func GetCustomGameConfigurationVOs(uid string) ([]CustomGameConfigurationSummary
 
 	customGameConfigurationVOs := make([]CustomGameConfigurationSummaryVO, 0)
 	for _, customGameConfigurationDAO := range customGameConfigurationDAOs {
-		customGameConfigurationVOs = append(customGameConfigurationVOs, CustomGameConfigurationSummaryMixer(customGameConfigurationDAO))
+		summary := CustomGameConfigurationSummaryMixer(customGameConfigurationDAO)
+		summary.IsOptimizing = IsCustomGameConfigurationOptimizing(customGameConfigurationDAO.Id)
+		customGameConfigurationVOs = append(customGameConfigurationVOs, summary)
 	}
 
 	return customGameConfigurationVOs, nil
@@ -458,6 +460,7 @@ func GetCustomGameConfigurationVO(configurationId string) (*CustomGameConfigurat
 		team1ParticipantsVOs,
 		team2ParticipantsVOs,
 	)
+	customGameConfigurationVO.IsOptimizing = IsCustomGameConfigurationOptimizing(configurationId)
 	return &customGameConfigurationVO, nil
 }
 

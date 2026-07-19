@@ -380,6 +380,7 @@ type CustomGameConfigurationSummaryVO struct {
 	Id            string                           `json:"id"`
 	Name          string                           `json:"name"`
 	LastUpdatedAt time.Time                        `json:"lastUpdatedAt"`
+	IsOptimizing  bool                             `json:"isOptimizing"`
 	Balance       CustomGameConfigurationBalanceVO `json:"balance"`
 }
 
@@ -460,6 +461,9 @@ type CustomGameConfigurationVO struct {
 	CreatorUid    string                           `json:"creatorUid"`
 	CreatedAt     time.Time                        `json:"createdAt"`
 	LastUpdatedAt time.Time                        `json:"lastUpdatedAt"`
+	IsOptimizing  bool                             `json:"isOptimizing"`
+	CanManage     bool                             `json:"canManage"`
+	OwnedPuuids   []string                         `json:"ownedPuuids"`
 	Balance       CustomGameConfigurationBalanceVO `json:"balance"`
 
 	Weights CustomGameConfigurationWeightsVO `json:"weights"`

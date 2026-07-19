@@ -78,6 +78,12 @@ func setSummonerLineFavor(c *gin.Context) {
 		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
 		return
 	}
+	lockedConfigs := make(map[string]bool)
+	defer func() {
+		for configId := range lockedConfigs {
+			service.EndCustomGameConfigurationMutation(configId)
+		}
+	}()
 
 	if len(req.Strengths) != 5 {
 		_ = tx.Rollback()
@@ -112,6 +118,14 @@ func setSummonerLineFavor(c *gin.Context) {
 		}
 
 		for _, candidateDAO := range candidateDAOs {
+			if !lockedConfigs[candidateDAO.CustomGameConfigId] {
+				if !service.TryBeginCustomGameConfigurationMutation(candidateDAO.CustomGameConfigId) {
+					_ = tx.Rollback()
+					util.AbortWithStrJson(c, http.StatusLocked, "최적의 조합을 계산 중이라 내전 구성을 변경할 수 없습니다.")
+					return
+				}
+				lockedConfigs[candidateDAO.CustomGameConfigId] = true
+			}
 			// update candidate
 			candidateDAO.FlavorTop = req.Strengths[0]
 			candidateDAO.FlavorJungle = req.Strengths[1]

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"team.gg-server/core"
 	"team.gg-server/libs/db"
@@ -145,5 +146,58 @@ func TestRsoStatusConsumesCompletedFlow(t *testing.T) {
 	}
 	if _, err := db.InMemoryDB.Get(rsoFlowKeyPrefix + flowId); !errors.Is(err, db.ErrValueNotFound) {
 		t.Fatal("completed flow must be consumed")
+	}
+}
+
+func TestRsoLinkForcesRiotReauthentication(t *testing.T) {
+	previousMemory := db.InMemoryDB
+	previousClientId := core.RsoClientId
+	previousClientSecret := core.RsoClientSecret
+	previousCallback := core.RsoClientCallbackUri
+	t.Cleanup(func() {
+		db.InMemoryDB = previousMemory
+		core.RsoClientId = previousClientId
+		core.RsoClientSecret = previousClientSecret
+		core.RsoClientCallbackUri = previousCallback
+	})
+
+	db.InMemoryDB = &rsoTestMemory{values: make(map[string]string)}
+	core.RsoClientId = "test-client"
+	core.RsoClientSecret = "test-secret"
+	core.RsoClientCallbackUri = "https://example.com/v1/auth/rsoLogin"
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/auth/rso/link/start", nil)
+	startRso(context, rsoModeLink, "teamgg-uid")
+
+	var response struct {
+		AuthorizeUrl string `json:"authorizeUrl"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(response.AuthorizeUrl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Query().Get("prompt") != "login" {
+		t.Fatalf("link authorize URL must force login: %s", response.AuthorizeUrl)
+	}
+}
+
+func TestRsoSuccessPageClosesPopup(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	renderRsoResult(context, true, "complete")
+	if !strings.Contains(recorder.Body.String(), "window.close()") {
+		t.Fatal("successful RSO callback page must close its popup")
+	}
+
+	recorder = httptest.NewRecorder()
+	context, _ = gin.CreateTestContext(recorder)
+	renderRsoResult(context, false, "failed")
+	if strings.Contains(recorder.Body.String(), "window.close()") {
+		t.Fatal("failed RSO callback page must remain open")
 	}
 }

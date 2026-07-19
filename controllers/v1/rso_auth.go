@@ -112,6 +112,10 @@ func startRso(c *gin.Context, mode, uid string) {
 	query.Set("response_type", "code")
 	query.Set("scope", "openid offline_access")
 	query.Set("state", state)
+	if mode == rsoModeLink {
+		// Linking must ask for credentials again so another Riot account can be selected.
+		query.Set("prompt", "login")
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"flowId":       flowId,
@@ -195,7 +199,7 @@ func RsoLogin(c *gin.Context) {
 			renderRsoResult(c, false, "연결 결과를 저장하지 못했습니다.")
 			return
 		}
-		renderRsoResult(c, true, "Riot 계정이 team.gg와 연결되었습니다. 이제 이 창을 닫아도 됩니다.")
+		renderRsoResult(c, true, "Riot 계정이 team.gg와 연결되었습니다. 잠시 후 창이 자동으로 닫힙니다.")
 		return
 	}
 
@@ -255,7 +259,7 @@ func RsoLogin(c *gin.Context) {
 		return
 	}
 
-	renderRsoResult(c, true, "인증이 완료되었습니다. 이제 이 창을 닫아도 됩니다.")
+	renderRsoResult(c, true, "인증이 완료되었습니다. 잠시 후 창이 자동으로 닫힙니다.")
 }
 
 func exchangeRsoAccount(code string) (*riotAccountResponse, error) {
@@ -346,6 +350,7 @@ func createRiotOnlyUser(c *gin.Context, setup rsoSetup) (*models.UserDAO, error)
 		ProviderSubject: setup.Puuid,
 		Uid:             uid,
 		DisplayName:     setup.DisplayName,
+		IsPrimary:       true,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
@@ -471,12 +476,16 @@ func linkRiotIdentity(c *gin.Context, uid string, account *riotAccountResponse, 
 		return errors.New("로그인된 team.gg 계정을 확인하지 못했습니다")
 	}
 	displayName := riotDisplayName(account)
-	currentIdentity, currentExists, err := models.GetUserIdentityDAO_byUid(db.Root, models.UserIdentityProviderRiot, uid)
+	currentIdentities, err := models.GetUserIdentityDAOs_byUid(db.Root, models.UserIdentityProviderRiot, uid)
 	if err != nil {
 		return err
 	}
-	if currentExists && currentIdentity.ProviderSubject != account.Puuid {
-		return errors.New("이미 다른 Riot 계정이 연결되어 있습니다")
+	hasCurrentPrimary := false
+	for _, current := range currentIdentities {
+		if current.IsPrimary {
+			hasCurrentPrimary = true
+			break
+		}
 	}
 
 	identity, exists, err := models.GetUserIdentityDAO(db.Root, models.UserIdentityProviderRiot, account.Puuid)
@@ -486,6 +495,9 @@ func linkRiotIdentity(c *gin.Context, uid string, account *riotAccountResponse, 
 	if exists && identity.Uid == uid {
 		identity.DisplayName = displayName
 		identity.UpdatedAt = time.Now()
+		if !hasCurrentPrimary {
+			identity.IsPrimary = true
+		}
 		return identity.Upsert(db.Root)
 	}
 	if exists {
@@ -507,9 +519,23 @@ func linkRiotIdentity(c *gin.Context, uid string, account *riotAccountResponse, 
 			_ = tx.Rollback()
 			return err
 		}
-		if _, err := tx.Exec(`UPDATE user_identities SET uid = ?, display_name = ?, updated_at = ? WHERE provider = ? AND provider_subject = ?`, uid, displayName, time.Now(), models.UserIdentityProviderRiot, account.Puuid); err != nil {
+		if _, err := tx.Exec(`UPDATE user_identities SET is_primary = 0 WHERE provider = ? AND uid = ?`, models.UserIdentityProviderRiot, identity.Uid); err != nil {
 			_ = tx.Rollback()
 			return err
+		}
+		if _, err := tx.Exec(`UPDATE user_identities SET uid = ? WHERE uid = ?`, uid, identity.Uid); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE user_identities SET display_name = ?, updated_at = ? WHERE provider = ? AND provider_subject = ?`, displayName, time.Now(), models.UserIdentityProviderRiot, account.Puuid); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if !hasCurrentPrimary {
+			if err := models.SetPrimaryUserIdentityDAO(tx, models.UserIdentityProviderRiot, uid, account.Puuid, time.Now()); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
 		}
 		if _, err := tx.Exec(`DELETE FROM users WHERE uid = ?`, identity.Uid); err != nil {
 			_ = tx.Rollback()
@@ -528,6 +554,7 @@ func linkRiotIdentity(c *gin.Context, uid string, account *riotAccountResponse, 
 		ProviderSubject: account.Puuid,
 		Uid:             uid,
 		DisplayName:     displayName,
+		IsPrimary:       !hasCurrentPrimary,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}).Upsert(db.Root)
@@ -543,31 +570,65 @@ func GetMyAccount(c *gin.Context) {
 		util.AbortWithStrJson(c, http.StatusNotFound, "team.gg 계정을 찾지 못했습니다.")
 		return
 	}
-	identity, connected, err := models.GetUserIdentityDAO_byUid(db.Root, models.UserIdentityProviderRiot, uid)
+	identities, err := models.GetUserIdentityDAOs_byUid(db.Root, models.UserIdentityProviderRiot, uid)
 	if err != nil {
 		log.Error(err)
 		util.AbortWithStrJson(c, http.StatusInternalServerError, "연결 정보를 확인하지 못했습니다.")
 		return
 	}
-	rsoInfo := gin.H{"connected": connected, "canUnlink": connected && !strings.HasPrefix(userDAO.UserId, "riot_")}
+	connected := len(identities) > 0
+	rsoInfo := gin.H{"connected": connected, "accounts": make([]gin.H, 0)}
 	displayName := userDAO.UserId
 	if connected {
-		rsoInfo["displayName"] = identity.DisplayName
-		displayName = identity.DisplayName
-		gameName, tagLine, validRiotId := splitRiotDisplayName(identity.DisplayName)
-		if summoner, isLolAccount, summonerErr := models.GetSummonerDAO_byNameTag(db.Root, gameName, tagLine); summonerErr != nil {
-			log.Error(summonerErr)
-			util.AbortWithStrJson(c, http.StatusInternalServerError, "Riot 계정 정보를 확인하지 못했습니다.")
-			return
-		} else if validRiotId && isLolAccount {
-			rsoInfo["gameName"] = summoner.GameName
-			rsoInfo["tagLine"] = summoner.TagLine
-			rsoInfo["profileIconId"] = summoner.ProfileIconId
-			rsoInfo["isLolAccount"] = true
-			displayName = fmt.Sprintf("%s#%s", summoner.GameName, summoner.TagLine)
-		} else {
-			rsoInfo["isLolAccount"] = false
+		primaryIndex := 0
+		for index := range identities {
+			if identities[index].IsPrimary {
+				primaryIndex = index
+				break
+			}
 		}
+		if !identities[primaryIndex].IsPrimary {
+			if err := models.SetPrimaryUserIdentityDAO(db.Root, models.UserIdentityProviderRiot, uid, identities[primaryIndex].ProviderSubject, time.Now()); err != nil {
+				log.Error(err)
+				util.AbortWithStrJson(c, http.StatusInternalServerError, "대표 Riot 계정을 설정하지 못했습니다.")
+				return
+			}
+			identities[primaryIndex].IsPrimary = true
+		}
+
+		rsoAccounts := make([]gin.H, 0, len(identities))
+		canUnlink := !strings.HasPrefix(userDAO.UserId, "riot_") || len(identities) > 1
+		for index, identity := range identities {
+			accountInfo := gin.H{
+				"puuid": identity.ProviderSubject, "displayName": identity.DisplayName,
+				"isPrimary": index == primaryIndex, "canUnlink": canUnlink, "isLolAccount": false,
+			}
+			gameName, tagLine, validRiotId := splitRiotDisplayName(identity.DisplayName)
+			if validRiotId {
+				summoner, isLolAccount, summonerErr := models.GetSummonerDAO_byNameTag(db.Root, gameName, tagLine)
+				if summonerErr != nil {
+					log.Error(summonerErr)
+					util.AbortWithStrJson(c, http.StatusInternalServerError, "Riot 계정 정보를 확인하지 못했습니다.")
+					return
+				}
+				if isLolAccount {
+					accountInfo["gameName"] = summoner.GameName
+					accountInfo["tagLine"] = summoner.TagLine
+					accountInfo["profileIconId"] = summoner.ProfileIconId
+					accountInfo["isLolAccount"] = true
+					accountInfo["displayName"] = fmt.Sprintf("%s#%s", summoner.GameName, summoner.TagLine)
+				}
+			}
+			rsoAccounts = append(rsoAccounts, accountInfo)
+			if index == primaryIndex {
+				for key, value := range accountInfo {
+					rsoInfo[key] = value
+				}
+				displayName = accountInfo["displayName"].(string)
+			}
+		}
+		rsoInfo["accounts"] = rsoAccounts
+		rsoInfo["canUnlink"] = canUnlink
 	}
 	c.JSON(http.StatusOK, gin.H{"uid": userDAO.Uid, "userId": userDAO.UserId, "displayName": displayName, "riot": rsoInfo})
 }
@@ -582,13 +643,99 @@ func UnlinkRiotAccount(c *gin.Context) {
 		util.AbortWithStrJson(c, http.StatusNotFound, "team.gg 계정을 찾지 못했습니다.")
 		return
 	}
-	if strings.HasPrefix(userDAO.UserId, "riot_") {
+	identities, err := models.GetUserIdentityDAOs_byUid(db.Root, models.UserIdentityProviderRiot, uid)
+	if err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "Riot 연결 정보를 확인하지 못했습니다.")
+		return
+	}
+	if len(identities) == 0 {
+		util.AbortWithStrJson(c, http.StatusNotFound, "연결된 Riot 계정이 없습니다.")
+		return
+	}
+	if strings.HasPrefix(userDAO.UserId, "riot_") && len(identities) == 1 {
 		util.AbortWithStrJson(c, http.StatusConflict, "Riot 로그인 전용 계정은 연결을 해제할 수 없습니다.")
 		return
 	}
-	if err := models.DeleteUserIdentityDAO(db.Root, models.UserIdentityProviderRiot, uid); err != nil {
+	puuid := c.Query("puuid")
+	if puuid == "" {
+		for _, identity := range identities {
+			if identity.IsPrimary {
+				puuid = identity.ProviderSubject
+				break
+			}
+		}
+		if puuid == "" {
+			puuid = identities[0].ProviderSubject
+		}
+	}
+	var target *models.UserIdentityDAO
+	for index := range identities {
+		if identities[index].ProviderSubject == puuid {
+			target = &identities[index]
+			break
+		}
+	}
+	if target == nil {
+		util.AbortWithStrJson(c, http.StatusNotFound, "연결된 Riot 계정을 찾지 못했습니다.")
+		return
+	}
+	tx, err := db.Root.BeginTxx(c, nil)
+	if err != nil {
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "Riot 연결을 해제하지 못했습니다.")
+		return
+	}
+	if err := models.DeleteUserIdentityDAO_bySubject(tx, models.UserIdentityProviderRiot, uid, puuid); err != nil {
+		_ = tx.Rollback()
 		log.Error(err)
 		util.AbortWithStrJson(c, http.StatusInternalServerError, "Riot 연결을 해제하지 못했습니다.")
+		return
+	}
+	if target.IsPrimary && len(identities) > 1 {
+		for _, identity := range identities {
+			if identity.ProviderSubject != puuid {
+				if err := models.SetPrimaryUserIdentityDAO(tx, models.UserIdentityProviderRiot, uid, identity.ProviderSubject, time.Now()); err != nil {
+					_ = tx.Rollback()
+					log.Error(err)
+					util.AbortWithStrJson(c, http.StatusInternalServerError, "대표 Riot 계정을 변경하지 못했습니다.")
+					return
+				}
+				break
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "Riot 연결을 해제하지 못했습니다.")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func SetPrimaryRiotAccount(c *gin.Context) {
+	uid, ok := requireAccessToken(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		Puuid string `json:"puuid" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.AbortWithStrJson(c, http.StatusBadRequest, "Riot 계정을 선택해주세요.")
+		return
+	}
+	identity, exists, err := models.GetUserIdentityDAO(db.Root, models.UserIdentityProviderRiot, req.Puuid)
+	if err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "Riot 연결 정보를 확인하지 못했습니다.")
+		return
+	}
+	if !exists || identity.Uid != uid {
+		util.AbortWithStrJson(c, http.StatusNotFound, "연결된 Riot 계정을 찾지 못했습니다.")
+		return
+	}
+	if err := models.SetPrimaryUserIdentityDAO(db.Root, models.UserIdentityProviderRiot, uid, req.Puuid, time.Now()); err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "대표 Riot 계정을 변경하지 못했습니다.")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -611,10 +758,12 @@ func failRsoFlow(flowId, message string) {
 func renderRsoResult(c *gin.Context, success bool, message string) {
 	title := "Riot 인증 실패"
 	color := "#d13639"
+	closeScript := ""
 	if success {
 		title = "Riot 인증 완료"
 		color = "#c89b3c"
+		closeScript = `<script>setTimeout(function(){window.close()},800)</script>`
 	}
-	html := fmt.Sprintf(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>%s</title></head><body style="margin:0;background:#01030e;color:#f0e6d2;font-family:sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center"><main style="text-align:center;padding:32px"><h1 style="color:%s;font-size:24px">%s</h1><p style="color:#a09b8c">%s</p></main></body></html>`, title, color, title, message)
+	html := fmt.Sprintf(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>%s</title></head><body style="margin:0;background:#01030e;color:#f0e6d2;font-family:sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center"><main style="text-align:center;padding:32px"><h1 style="color:%s;font-size:24px">%s</h1><p style="color:#a09b8c">%s</p></main>%s</body></html>`, title, color, title, message, closeScript)
 	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
 }
