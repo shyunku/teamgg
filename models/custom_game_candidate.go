@@ -16,15 +16,21 @@ type CustomGameCandidateDAO struct {
 	FlavorMid          int     `db:"flavor_mid" json:"flavorMid"`
 	FlavorAdc          int     `db:"flavor_adc" json:"flavorAdc"`
 	FlavorSupport      int     `db:"flavor_support" json:"flavorSupport"`
+	MasteryTop         int     `db:"mastery_top" json:"masteryTop"`
+	MasteryJungle      int     `db:"mastery_jungle" json:"masteryJungle"`
+	MasteryMid         int     `db:"mastery_mid" json:"masteryMid"`
+	MasteryAdc         int     `db:"mastery_adc" json:"masteryAdc"`
+	MasterySupport     int     `db:"mastery_support" json:"masterySupport"`
 }
 
 func (c *CustomGameCandidateDAO) Upsert(db db.Context) error {
 	if _, err := db.Exec(`
 	INSERT INTO custom_game_candidates (
 		custom_game_config_id, puuid, custom_tier, custom_rank, 
-		flavor_top, flavor_jungle, flavor_mid, flavor_adc, flavor_support
+		flavor_top, flavor_jungle, flavor_mid, flavor_adc, flavor_support,
+		mastery_top, mastery_jungle, mastery_mid, mastery_adc, mastery_support
 	) VALUES (
-		?, ?, ?, ?, ?, ?, ?, ?, ?
+		?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 	) ON DUPLICATE KEY UPDATE
 	    custom_game_config_id = ?,
 		puuid = ?,
@@ -34,11 +40,18 @@ func (c *CustomGameCandidateDAO) Upsert(db db.Context) error {
 		flavor_jungle = ?,
 		flavor_mid = ?,
 		flavor_adc = ?,
-		flavor_support = ?`,
+		flavor_support = ?,
+		mastery_top = ?,
+		mastery_jungle = ?,
+		mastery_mid = ?,
+		mastery_adc = ?,
+		mastery_support = ?`,
 		c.CustomGameConfigId, c.Puuid, c.CustomTier, c.CustomRank,
 		c.FlavorTop, c.FlavorJungle, c.FlavorMid, c.FlavorAdc, c.FlavorSupport,
+		c.MasteryTop, c.MasteryJungle, c.MasteryMid, c.MasteryAdc, c.MasterySupport,
 		c.CustomGameConfigId, c.Puuid, c.CustomTier, c.CustomRank,
 		c.FlavorTop, c.FlavorJungle, c.FlavorMid, c.FlavorAdc, c.FlavorSupport,
+		c.MasteryTop, c.MasteryJungle, c.MasteryMid, c.MasteryAdc, c.MasterySupport,
 	); err != nil {
 		return err
 	}

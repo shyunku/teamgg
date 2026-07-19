@@ -2,6 +2,10 @@ package socket
 
 import (
 	socketio "github.com/googollee/go-socket.io"
+	"sort"
+	"strings"
+	"sync"
+	"team.gg-server/libs/db"
 	"team.gg-server/models"
 )
 
@@ -12,6 +16,7 @@ const (
 	EventJoinCustomConfigRoom        = "join_custom_config_room"
 	EventCustomConfigOptimizeProcess = "custom_config/optimize_process"
 	EventCustomConfigUpdated         = "custom_config/updated"
+	EventCustomConfigViewers         = "custom_config/viewers"
 )
 
 type UserSocket struct {
@@ -20,19 +25,24 @@ type UserSocket struct {
 }
 
 type Manager struct {
-	users   map[string]UserSocket
-	sockets map[string]UserSocket
-	Io      *socketio.Server
+	mu                sync.RWMutex
+	users             map[string]UserSocket
+	sockets           map[string]UserSocket
+	customConfigRooms map[string]map[string]struct{}
+	Io                *socketio.Server
 }
 
 func NewSocketManager() *Manager {
 	return &Manager{
-		users:   make(map[string]UserSocket),
-		sockets: make(map[string]UserSocket),
+		users:             make(map[string]UserSocket),
+		sockets:           make(map[string]UserSocket),
+		customConfigRooms: make(map[string]map[string]struct{}),
 	}
 }
 
 func (sm *Manager) AddUser(user *models.UserDAO, conn socketio.Conn) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 	userSocket := UserSocket{
 		Conn: conn,
 	}
@@ -44,6 +54,8 @@ func (sm *Manager) AddUser(user *models.UserDAO, conn socketio.Conn) {
 }
 
 func (sm *Manager) RemoveUserByUserId(userId string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 	userSocket, ok := sm.users[userId]
 	if ok {
 		delete(sm.sockets, userSocket.Conn.ID())
@@ -51,7 +63,10 @@ func (sm *Manager) RemoveUserByUserId(userId string) {
 	}
 }
 
-func (sm *Manager) RemoveUserByConnId(connId string) {
+func (sm *Manager) RemoveUserByConnId(connId string) []string {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	leftConfigIds := make([]string, 0)
 	userSocket, ok := sm.sockets[connId]
 	if ok {
 		delete(sm.sockets, connId)
@@ -59,11 +74,74 @@ func (sm *Manager) RemoveUserByConnId(connId string) {
 			delete(sm.users, userSocket.User.UserId)
 		}
 	}
+	for configId, connections := range sm.customConfigRooms {
+		if _, joined := connections[connId]; !joined {
+			continue
+		}
+		delete(connections, connId)
+		leftConfigIds = append(leftConfigIds, configId)
+		if len(connections) == 0 {
+			delete(sm.customConfigRooms, configId)
+		}
+	}
+	return leftConfigIds
 }
 
 func (sm *Manager) GetUserByUserId(userId string) (UserSocket, bool) {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
 	userSocket, ok := sm.users[userId]
 	return userSocket, ok
+}
+
+func (sm *Manager) TrackCustomConfigRoom(configId string, conn socketio.Conn) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if sm.customConfigRooms[configId] == nil {
+		sm.customConfigRooms[configId] = make(map[string]struct{})
+	}
+	sm.customConfigRooms[configId][conn.ID()] = struct{}{}
+}
+
+func (sm *Manager) BroadcastCustomConfigViewers(configId string) {
+	sm.mu.RLock()
+	uids := make(map[string]struct{})
+	for connId := range sm.customConfigRooms[configId] {
+		if userSocket, exists := sm.sockets[connId]; exists && userSocket.User != nil {
+			uids[userSocket.User.Uid] = struct{}{}
+		}
+	}
+	sm.mu.RUnlock()
+
+	puuidSet := make(map[string]struct{})
+	for uid := range uids {
+		identities, err := models.GetUserIdentityDAOs_byUid(db.Root, models.UserIdentityProviderRiot, uid)
+		if err != nil {
+			continue
+		}
+		for _, identity := range identities {
+			if identity.ProviderSubject != "" {
+				puuidSet[identity.ProviderSubject] = struct{}{}
+			}
+			separator := strings.LastIndex(identity.DisplayName, "#")
+			if separator <= 0 || separator >= len(identity.DisplayName)-1 {
+				continue
+			}
+			summoner, exists, err := models.GetSummonerDAO_byNameTag(
+				db.Root, identity.DisplayName[:separator], identity.DisplayName[separator+1:],
+			)
+			if err == nil && exists {
+				puuidSet[summoner.Puuid] = struct{}{}
+			}
+		}
+	}
+
+	puuids := make([]string, 0, len(puuidSet))
+	for puuid := range puuidSet {
+		puuids = append(puuids, puuid)
+	}
+	sort.Strings(puuids)
+	sm.BroadcastToCustomConfigRoom(configId, EventCustomConfigViewers, map[string]interface{}{"puuids": puuids})
 }
 
 func (sm *Manager) BroadcastToCustomConfigRoom(configId string, event string, data interface{}) {

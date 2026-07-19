@@ -8,13 +8,18 @@ import (
 )
 
 type RiotCustomGamePreferenceDAO struct {
-	Puuid         string    `db:"puuid" json:"puuid"`
-	FlavorTop     int       `db:"flavor_top" json:"flavorTop"`
-	FlavorJungle  int       `db:"flavor_jungle" json:"flavorJungle"`
-	FlavorMid     int       `db:"flavor_mid" json:"flavorMid"`
-	FlavorAdc     int       `db:"flavor_adc" json:"flavorAdc"`
-	FlavorSupport int       `db:"flavor_support" json:"flavorSupport"`
-	UpdatedAt     time.Time `db:"updated_at" json:"updatedAt"`
+	Puuid          string    `db:"puuid" json:"puuid"`
+	FlavorTop      int       `db:"flavor_top" json:"flavorTop"`
+	FlavorJungle   int       `db:"flavor_jungle" json:"flavorJungle"`
+	FlavorMid      int       `db:"flavor_mid" json:"flavorMid"`
+	FlavorAdc      int       `db:"flavor_adc" json:"flavorAdc"`
+	FlavorSupport  int       `db:"flavor_support" json:"flavorSupport"`
+	MasteryTop     int       `db:"mastery_top" json:"masteryTop"`
+	MasteryJungle  int       `db:"mastery_jungle" json:"masteryJungle"`
+	MasteryMid     int       `db:"mastery_mid" json:"masteryMid"`
+	MasteryAdc     int       `db:"mastery_adc" json:"masteryAdc"`
+	MasterySupport int       `db:"mastery_support" json:"masterySupport"`
+	UpdatedAt      time.Time `db:"updated_at" json:"updatedAt"`
 }
 
 func EnsureRiotCustomGamePreferenceTable(database db.Context) error {
@@ -26,6 +31,11 @@ func EnsureRiotCustomGamePreferenceTable(database db.Context) error {
 			flavor_mid INT NOT NULL DEFAULT 0,
 			flavor_adc INT NOT NULL DEFAULT 0,
 			flavor_support INT NOT NULL DEFAULT 0,
+			mastery_top INT NOT NULL DEFAULT 0,
+			mastery_jungle INT NOT NULL DEFAULT 0,
+			mastery_mid INT NOT NULL DEFAULT 0,
+			mastery_adc INT NOT NULL DEFAULT 0,
+			mastery_support INT NOT NULL DEFAULT 0,
 			updated_at DATETIME NOT NULL,
 			CONSTRAINT riot_custom_game_preferences_summoners_puuid_fk
 				FOREIGN KEY (puuid) REFERENCES summoners (puuid)
@@ -38,13 +48,18 @@ func EnsureRiotCustomGamePreferenceTable(database db.Context) error {
 func (p *RiotCustomGamePreferenceDAO) Upsert(database db.Context) error {
 	_, err := database.Exec(`
 		INSERT INTO riot_custom_game_preferences
-			(puuid, flavor_top, flavor_jungle, flavor_mid, flavor_adc, flavor_support, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+			(puuid, flavor_top, flavor_jungle, flavor_mid, flavor_adc, flavor_support,
+			 mastery_top, mastery_jungle, mastery_mid, mastery_adc, mastery_support, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE
 			flavor_top = VALUES(flavor_top), flavor_jungle = VALUES(flavor_jungle),
 			flavor_mid = VALUES(flavor_mid), flavor_adc = VALUES(flavor_adc),
-			flavor_support = VALUES(flavor_support), updated_at = VALUES(updated_at)
-	`, p.Puuid, p.FlavorTop, p.FlavorJungle, p.FlavorMid, p.FlavorAdc, p.FlavorSupport, p.UpdatedAt)
+			flavor_support = VALUES(flavor_support),
+			mastery_top = VALUES(mastery_top), mastery_jungle = VALUES(mastery_jungle),
+			mastery_mid = VALUES(mastery_mid), mastery_adc = VALUES(mastery_adc),
+			mastery_support = VALUES(mastery_support), updated_at = VALUES(updated_at)
+	`, p.Puuid, p.FlavorTop, p.FlavorJungle, p.FlavorMid, p.FlavorAdc, p.FlavorSupport,
+		p.MasteryTop, p.MasteryJungle, p.MasteryMid, p.MasteryAdc, p.MasterySupport, p.UpdatedAt)
 	return err
 }
 

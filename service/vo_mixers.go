@@ -250,6 +250,7 @@ func CustomGameConfigurationWeightsMixer(d models.CustomGameConfigurationDAO) Cu
 		LineFairness:     d.LineFairnessWeight,
 		TierFairness:     d.TierFairnessWeight,
 		LineSatisfaction: d.LineSatisfactionWeight,
+		MasteryInfluence: d.MasteryInfluenceWeight,
 		TopInfluence:     d.TopInfluenceWeight,
 		JungleInfluence:  d.JungleInfluenceWeight,
 		MidInfluence:     d.MidInfluenceWeight,

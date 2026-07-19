@@ -95,6 +95,9 @@ func UnsafeAuthMiddleware(c *gin.Context) {
 	var accessToken string
 	if strings.HasPrefix(authz, "Bearer ") {
 		accessToken = strings.TrimPrefix(authz, "Bearer ")
+	} else if queryToken := c.Query("accessToken"); queryToken != "" {
+		// Browser WebSocket handshakes cannot attach arbitrary Authorization headers.
+		accessToken = queryToken
 	} else {
 		// 보조: 쿠키도 시도 (파폭 데스크톱 임시 호환)
 		if v, err := c.Cookie("accessToken"); err == nil {

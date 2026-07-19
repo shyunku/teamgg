@@ -441,6 +441,7 @@ create table custom_game_configurations
     line_fairness_weight     double     default 0.36 not null,
     tier_fairness_weight     double     default 0.24 not null,
     line_satisfaction_weight double     default 0.4  not null,
+    mastery_influence_weight double     default 0.5  not null,
     top_influence_weight     double     default 0.14 not null,
     jungle_influence_weight  double     default 0.23 not null,
     mid_influence_weight     double     default 0.25 not null,
@@ -462,6 +463,11 @@ create table custom_game_candidates
     flavor_mid            int default 0 not null,
     flavor_adc            int default 0 not null,
     flavor_support        int default 0 not null,
+    mastery_top           int default 0 not null,
+    mastery_jungle        int default 0 not null,
+    mastery_mid           int default 0 not null,
+    mastery_adc           int default 0 not null,
+    mastery_support       int default 0 not null,
     primary key (custom_game_config_id, puuid),
     constraint custom_game_candidates_custom_game_configurations_id_fk
         foreign key (custom_game_config_id) references custom_game_configurations (id)

@@ -63,6 +63,13 @@ type SetCustomGameParticipantFavorPositionRequestDto struct {
 	Strength           *int   `json:"strength" binding:"required"`
 }
 
+type SetCustomGameParticipantLineMasteryRequestDto struct {
+	CustomGameConfigId string `json:"customGameConfigId" binding:"required"`
+	Puuid              string `json:"puuid" binding:"required"`
+	Position           string `json:"position" binding:"required"`
+	Level              *int   `json:"level" binding:"required"`
+}
+
 type SaveCustomGameDefaultFavorPositionRequestDto struct {
 	CustomGameConfigId string `json:"customGameConfigId" binding:"required"`
 	Puuid              string `json:"puuid" binding:"required"`
@@ -90,6 +97,7 @@ type OptimizeCustomGameConfigurationRequestDto struct {
 	LineFairnessWeight     *float64 `json:"lineFairnessWeight" binding:"required"`
 	TierFairnessWeight     *float64 `json:"tierFairnessWeight" binding:"required"`
 	LineSatisfactionWeight *float64 `json:"lineSatisfactionWeight" binding:"required"`
+	MasteryInfluenceWeight *float64 `json:"masteryInfluenceWeight" binding:"required"`
 }
 
 type UtilityRequestDto struct {

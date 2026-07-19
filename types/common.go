@@ -35,6 +35,7 @@ const (
 	WeightLineFairness     = 0.20
 	WeightTierFairness     = 0.40
 	WeightLineSatisfaction = 1 - WeightLineFairness - WeightTierFairness
+	WeightMasteryInfluence = 0.50
 
 	WeightTopInfluence     = 0.20
 	WeightJungleInfluence  = 0.20

@@ -392,14 +392,23 @@ type CustomGameCandidatePositionFavorVO struct {
 	Support int `json:"support"`
 }
 
+type CustomGameCandidatePositionMasteryVO struct {
+	Top     int `json:"top"`
+	Jungle  int `json:"jungle"`
+	Mid     int `json:"mid"`
+	Adc     int `json:"adc"`
+	Support int `json:"support"`
+}
+
 type CustomGameCandidateVO struct {
-	Summary       SummonerSummaryVO                  `json:"summary"`
-	SoloRank      *SummonerRankVO                    `json:"soloRank"`
-	FlexRank      *SummonerRankVO                    `json:"flexRank"`
-	CustomRank    *SummonerRankVO                    `json:"customRank"`
-	PositionFavor CustomGameCandidatePositionFavorVO `json:"positionFavor"`
-	Mastery       []SummonerMasteryVO                `json:"mastery"`
-	ColorCode     int                                `json:"colorCode"`
+	Summary         SummonerSummaryVO                    `json:"summary"`
+	SoloRank        *SummonerRankVO                      `json:"soloRank"`
+	FlexRank        *SummonerRankVO                      `json:"flexRank"`
+	CustomRank      *SummonerRankVO                      `json:"customRank"`
+	PositionFavor   CustomGameCandidatePositionFavorVO   `json:"positionFavor"`
+	PositionMastery CustomGameCandidatePositionMasteryVO `json:"positionMastery"`
+	Mastery         []SummonerMasteryVO                  `json:"mastery"`
+	ColorCode       int                                  `json:"colorCode"`
 }
 
 func (c *CustomGameCandidateVO) GetRepresentativeRank() *SummonerRankVO {
@@ -442,6 +451,7 @@ type CustomGameConfigurationWeightsVO struct {
 	LineFairness     float64 `json:"lineFairness"`
 	TierFairness     float64 `json:"tierFairness"`
 	LineSatisfaction float64 `json:"lineSatisfaction"`
+	MasteryInfluence float64 `json:"masteryInfluence"`
 
 	TopInfluence     float64 `json:"topInfluence"`
 	JungleInfluence  float64 `json:"jungleInfluence"`

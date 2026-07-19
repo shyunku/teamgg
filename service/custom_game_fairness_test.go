@@ -53,7 +53,27 @@ func testBalanceWeights() CustomGameConfigurationWeightsVO {
 		TierFairness:     0.4,
 		LineFairness:     0.2,
 		LineSatisfaction: 0.4,
+		MasteryInfluence: 0.5,
 	}
+}
+
+func TestCalculateCustomGameConfigFairnessAppliesAssignedLineMastery(t *testing.T) {
+	participants := balancedParticipants(1000, 1000, 2)
+	team1 := participants[types.PositionTop+"-1"]
+	team2 := participants[types.PositionTop+"-2"]
+	team1.PositionMastery.Top = 5
+	team2.PositionMastery.Top = 0
+	participants[types.PositionTop+"-1"] = team1
+	participants[types.PositionTop+"-2"] = team2
+
+	balance, err := calculateCustomGameConfigFairness(participants, testBalanceWeights())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// With 50% influence, level 5 is +10% and level 0 is -10%.
+	assertClose(t, "top line fairness", balance.LineFairness, (0.9/1.1+4)/5)
+	assertClose(t, "team fairness", balance.TierFairness, 4.5/4.7)
 }
 
 func TestCalculateCustomGameConfigFairnessPerfectBalance(t *testing.T) {

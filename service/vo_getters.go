@@ -301,6 +301,22 @@ func GetCustomGameConfigurationVOs(uid string) ([]CustomGameConfigurationSummary
 	return customGameConfigurationVOs, nil
 }
 
+func GetJoinedCustomGameConfigurationVOs(uid string, puuids []string) ([]CustomGameConfigurationSummaryVO, error) {
+	customGameConfigurationDAOs, err := models.GetCustomGameDAOs_byParticipantPuuids(db.Root, uid, puuids)
+	if err != nil {
+		log.Error(err)
+		return nil, err
+	}
+
+	customGameConfigurationVOs := make([]CustomGameConfigurationSummaryVO, 0, len(customGameConfigurationDAOs))
+	for _, customGameConfigurationDAO := range customGameConfigurationDAOs {
+		summary := CustomGameConfigurationSummaryMixer(customGameConfigurationDAO)
+		summary.IsOptimizing = IsCustomGameConfigurationOptimizing(customGameConfigurationDAO.Id)
+		customGameConfigurationVOs = append(customGameConfigurationVOs, summary)
+	}
+	return customGameConfigurationVOs, nil
+}
+
 func GetCustomGameCandidateVO(candidateDAO models.CustomGameCandidateDAO) (*CustomGameCandidateVO, error) {
 	summonerDao, exists, err := models.GetSummonerDAO_byPuuid(db.Root, candidateDAO.Puuid)
 	if err != nil {
@@ -365,6 +381,11 @@ func GetCustomGameCandidateVO(candidateDAO models.CustomGameCandidateDAO) (*Cust
 		Adc:     candidateDAO.FlavorAdc,
 		Support: candidateDAO.FlavorSupport,
 	}
+	positionMasteryVO := CustomGameCandidatePositionMasteryVO{
+		Top: candidateDAO.MasteryTop, Jungle: candidateDAO.MasteryJungle,
+		Mid: candidateDAO.MasteryMid, Adc: candidateDAO.MasteryAdc,
+		Support: candidateDAO.MasterySupport,
+	}
 
 	masteryDAO, err := models.GetMasteryDAOs(db.Root, candidateDAO.Puuid)
 	if err != nil {
@@ -377,12 +398,13 @@ func GetCustomGameCandidateVO(candidateDAO models.CustomGameCandidateDAO) (*Cust
 	}
 
 	return &CustomGameCandidateVO{
-		Summary:       summonerVO,
-		SoloRank:      soloLeagueVO,
-		FlexRank:      flexLeagueVO,
-		CustomRank:    customRankVO,
-		PositionFavor: positionFavorVO,
-		Mastery:       masteryVOs,
+		Summary:         summonerVO,
+		SoloRank:        soloLeagueVO,
+		FlexRank:        flexLeagueVO,
+		CustomRank:      customRankVO,
+		PositionFavor:   positionFavorVO,
+		PositionMastery: positionMasteryVO,
+		Mastery:         masteryVOs,
 	}, nil
 }
 
@@ -429,13 +451,14 @@ func GetCustomGameConfigurationVO(configurationId string) (*CustomGameConfigurat
 			return nil, err
 		}
 		candidateVOs = append(candidateVOs, CustomGameCandidateVO{
-			Summary:       summonerVO.Summary,
-			SoloRank:      summonerVO.SoloRank,
-			FlexRank:      summonerVO.FlexRank,
-			CustomRank:    summonerVO.CustomRank,
-			PositionFavor: summonerVO.PositionFavor,
-			Mastery:       summonerVO.Mastery,
-			ColorCode:     colorCode,
+			Summary:         summonerVO.Summary,
+			SoloRank:        summonerVO.SoloRank,
+			FlexRank:        summonerVO.FlexRank,
+			CustomRank:      summonerVO.CustomRank,
+			PositionFavor:   summonerVO.PositionFavor,
+			PositionMastery: summonerVO.PositionMastery,
+			Mastery:         summonerVO.Mastery,
+			ColorCode:       colorCode,
 		})
 	}
 

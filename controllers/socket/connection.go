@@ -84,8 +84,11 @@ func userHandlers(io *socketio.Server) {
 
 	io.OnDisconnect("/", func(s socketio.Conn, reason string) {
 		log.Debugf("Socket disconnected: %v", reason)
-		SocketIO.RemoveUserByConnId(s.ID())
+		configIds := SocketIO.RemoveUserByConnId(s.ID())
 		s.LeaveAll()
+		for _, configId := range configIds {
+			SocketIO.BroadcastCustomConfigViewers(configId)
+		}
 	})
 
 	io.OnEvent("/", EventTest, func(s socketio.Conn, msg string) {
@@ -97,5 +100,7 @@ func userHandlers(io *socketio.Server) {
 	io.OnEvent("/", EventJoinCustomConfigRoom, func(s socketio.Conn, configId string) {
 		log.Debugf("Socket event: [%v] %v", s.ID(), configId)
 		s.Join(RoomKey(configId))
+		SocketIO.TrackCustomConfigRoom(configId, s)
+		SocketIO.BroadcastCustomConfigViewers(configId)
 	})
 }

@@ -41,6 +41,9 @@ var (
 		if err := models.EnsureRiotCustomGamePreferenceTable(db); err != nil {
 			return err
 		}
+		if err := models.EnsureCustomGameLineMasterySchema(db); err != nil {
+			return err
+		}
 
 		// find static data tables
 		var staticTierRankTable interface{}

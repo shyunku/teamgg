@@ -129,6 +129,7 @@ func UseCustomGameRouter(r *gin.RouterGroup) {
 	g := r.Group("/custom-game")
 
 	g.GET("/list", GetCustomGameConfigurationList)
+	g.GET("/joined-list", GetJoinedCustomGameConfigurationList)
 	g.GET("/info", GetCustomGameConfiguration)
 	g.POST("/create", CreateCustomGameConfiguration)
 	g.PATCH("/name", UpdateCustomGameConfigurationName)
@@ -142,6 +143,7 @@ func UseCustomGameRouter(r *gin.RouterGroup) {
 	g.POST("/arrange", ArrangeCustomGameParticipant)
 	g.POST("/unarrange", UnarrangeCustomGameParticipant)
 	g.POST("/favor-position", SetCustomGameParticipantFavorPosition)
+	g.POST("/line-mastery", SetCustomGameParticipantLineMastery)
 	g.POST("/default-favor-position", SaveCustomGameDefaultFavorPosition)
 	g.POST("/reset-favor-position", ResetCustomGameFavorPositionToDefault)
 	g.POST("/custom-tier-rank", SetCustomGameCandidateCustomTierRank)
@@ -167,6 +169,28 @@ func GetCustomGameConfigurationList(c *gin.Context) {
 
 	// get all custom games from db
 	resp, err := service.GetCustomGameConfigurationVOs(uid)
+	if err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func GetJoinedCustomGameConfigurationList(c *gin.Context) {
+	uid := c.GetString("uid")
+	if uid == "" {
+		util.AbortWithStrJson(c, http.StatusUnauthorized, "user not found")
+		return
+	}
+
+	ownedPuuids, err := getUserRiotPuuids(db.Root, uid)
+	if err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "Riot 계정 연결 정보를 확인하지 못했습니다.")
+		return
+	}
+	resp, err := service.GetJoinedCustomGameConfigurationVOs(uid, ownedPuuids)
 	if err != nil {
 		log.Error(err)
 		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
@@ -280,6 +304,7 @@ func CreateCustomGameConfiguration(c *gin.Context) {
 		LineFairnessWeight:     types.WeightLineFairness,
 		TierFairnessWeight:     types.WeightTierFairness,
 		LineSatisfactionWeight: types.WeightLineSatisfaction,
+		MasteryInfluenceWeight: types.WeightMasteryInfluence,
 		TopInfluenceWeight:     types.WeightTopInfluence,
 		JungleInfluenceWeight:  types.WeightJungleInfluence,
 		MidInfluenceWeight:     types.WeightMidInfluence,
@@ -513,7 +538,7 @@ func AddCandidateToCustomGameConfiguration(c *gin.Context) {
 	defaultPreference, hasDefaultPreference, err := models.GetRiotCustomGamePreferenceDAO_byPuuid(db.Root, summonerDAO.Puuid)
 	if err != nil {
 		log.Error(err)
-		util.AbortWithStrJson(c, http.StatusInternalServerError, "기본 포지션 선호도를 불러오지 못했습니다.")
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "기본 포지션 선호도와 숙련도를 불러오지 못했습니다.")
 		return
 	}
 	if hasDefaultPreference {
@@ -522,6 +547,11 @@ func AddCandidateToCustomGameConfiguration(c *gin.Context) {
 		newCandidateDAO.FlavorMid = defaultPreference.FlavorMid
 		newCandidateDAO.FlavorAdc = defaultPreference.FlavorAdc
 		newCandidateDAO.FlavorSupport = defaultPreference.FlavorSupport
+		newCandidateDAO.MasteryTop = defaultPreference.MasteryTop
+		newCandidateDAO.MasteryJungle = defaultPreference.MasteryJungle
+		newCandidateDAO.MasteryMid = defaultPreference.MasteryMid
+		newCandidateDAO.MasteryAdc = defaultPreference.MasteryAdc
+		newCandidateDAO.MasterySupport = defaultPreference.MasterySupport
 	}
 	if err := newCandidateDAO.Upsert(db.Root); err != nil {
 		log.Error(err)
@@ -929,6 +959,88 @@ func SetCustomGameParticipantFavorPosition(c *gin.Context) {
 	c.JSON(http.StatusOK, nil)
 }
 
+func SetCustomGameParticipantLineMastery(c *gin.Context) {
+	var req SetCustomGameParticipantLineMasteryRequestDto
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.AbortWithStrJson(c, http.StatusBadRequest, "요청 정보를 확인해주세요.")
+		return
+	}
+	if !beginCustomGameConfigurationMutation(c, req.CustomGameConfigId) {
+		return
+	}
+	defer service.EndCustomGameConfigurationMutation(req.CustomGameConfigId)
+
+	uid := c.GetString("uid")
+	permitted, err := canEditCustomGameCandidatePreference(db.Root, req.CustomGameConfigId, req.Puuid, uid)
+	if err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "Riot 계정 연결 정보를 확인하지 못했습니다.")
+		return
+	}
+	if !permitted {
+		util.AbortWithStrJson(c, http.StatusForbidden, "본인 Riot 계정의 라인 숙련도만 변경할 수 있습니다.")
+		return
+	}
+	if req.Level == nil || *req.Level < 0 || *req.Level > 5 {
+		util.AbortWithStrJson(c, http.StatusBadRequest, "라인 숙련도는 0~5단계로 설정해야 합니다.")
+		return
+	}
+
+	tx, err := db.Root.BeginTxx(c, nil)
+	if err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "라인 숙련도를 변경하지 못했습니다.")
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	candidate, exists, err := models.GetCustomGameCandidateDAO_byPuuid(tx, req.CustomGameConfigId, req.Puuid)
+	if err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "라인 숙련도를 확인하지 못했습니다.")
+		return
+	}
+	if !exists {
+		util.AbortWithStrJson(c, http.StatusNotFound, "이 구성에서 Riot 계정을 찾지 못했습니다.")
+		return
+	}
+
+	switch strings.ToUpper(req.Position) {
+	case types.PositionTop:
+		candidate.MasteryTop = *req.Level
+	case types.PositionJungle:
+		candidate.MasteryJungle = *req.Level
+	case types.PositionMid:
+		candidate.MasteryMid = *req.Level
+	case types.PositionAdc:
+		candidate.MasteryAdc = *req.Level
+	case types.PositionSupport:
+		candidate.MasterySupport = *req.Level
+	default:
+		util.AbortWithStrJson(c, http.StatusBadRequest, "지원하지 않는 라인입니다.")
+		return
+	}
+
+	if err := candidate.Upsert(tx); err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "라인 숙련도를 저장하지 못했습니다.")
+		return
+	}
+	if err := service.RecalculateCustomGameBalance(tx, req.CustomGameConfigId); err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "내전 밸런스를 다시 계산하지 못했습니다.")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "라인 숙련도를 저장하지 못했습니다.")
+		return
+	}
+
+	socket.SocketIO.MulticastToCustomConfigRoom(req.CustomGameConfigId, uid, socket.EventCustomConfigUpdated, nil)
+	c.JSON(http.StatusOK, nil)
+}
+
 func SaveCustomGameDefaultFavorPosition(c *gin.Context) {
 	var req SaveCustomGameDefaultFavorPositionRequestDto
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -955,13 +1067,13 @@ func SaveCustomGameDefaultFavorPosition(c *gin.Context) {
 		}
 	}
 	if !isOwned {
-		util.AbortWithStrJson(c, http.StatusForbidden, "본인 Riot 계정의 선호도만 기본값으로 저장할 수 있습니다.")
+		util.AbortWithStrJson(c, http.StatusForbidden, "본인 Riot 계정의 선호도와 숙련도만 기본값으로 저장할 수 있습니다.")
 		return
 	}
 	candidate, exists, err := models.GetCustomGameCandidateDAO_byPuuid(db.Root, req.CustomGameConfigId, req.Puuid)
 	if err != nil {
 		log.Error(err)
-		util.AbortWithStrJson(c, http.StatusInternalServerError, "포지션 선호도를 확인하지 못했습니다.")
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "포지션 선호도와 숙련도를 확인하지 못했습니다.")
 		return
 	}
 	if !exists {
@@ -971,11 +1083,14 @@ func SaveCustomGameDefaultFavorPosition(c *gin.Context) {
 	preference := models.RiotCustomGamePreferenceDAO{
 		Puuid: candidate.Puuid, FlavorTop: candidate.FlavorTop, FlavorJungle: candidate.FlavorJungle,
 		FlavorMid: candidate.FlavorMid, FlavorAdc: candidate.FlavorAdc,
-		FlavorSupport: candidate.FlavorSupport, UpdatedAt: time.Now(),
+		FlavorSupport: candidate.FlavorSupport,
+		MasteryTop:    candidate.MasteryTop, MasteryJungle: candidate.MasteryJungle,
+		MasteryMid: candidate.MasteryMid, MasteryAdc: candidate.MasteryAdc,
+		MasterySupport: candidate.MasterySupport, UpdatedAt: time.Now(),
 	}
 	if err := preference.Upsert(db.Root); err != nil {
 		log.Error(err)
-		util.AbortWithStrJson(c, http.StatusInternalServerError, "기본 포지션 선호도를 저장하지 못했습니다.")
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "기본 포지션 선호도와 숙련도를 저장하지 못했습니다.")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -1000,14 +1115,14 @@ func ResetCustomGameFavorPositionToDefault(c *gin.Context) {
 		return
 	}
 	if !permitted {
-		util.AbortWithStrJson(c, http.StatusForbidden, "본인 Riot 계정의 포지션 선호도만 초기화할 수 있습니다.")
+		util.AbortWithStrJson(c, http.StatusForbidden, "본인 Riot 계정의 포지션 선호도와 숙련도만 초기화할 수 있습니다.")
 		return
 	}
 
 	tx, err := db.Root.BeginTxx(c, nil)
 	if err != nil {
 		log.Error(err)
-		util.AbortWithStrJson(c, http.StatusInternalServerError, "기본 포지션 선호도를 적용하지 못했습니다.")
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "기본 포지션 선호도와 숙련도를 적용하지 못했습니다.")
 		return
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -1015,7 +1130,7 @@ func ResetCustomGameFavorPositionToDefault(c *gin.Context) {
 	candidate, exists, err := models.GetCustomGameCandidateDAO_byPuuid(tx, req.CustomGameConfigId, req.Puuid)
 	if err != nil {
 		log.Error(err)
-		util.AbortWithStrJson(c, http.StatusInternalServerError, "포지션 선호도를 확인하지 못했습니다.")
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "포지션 선호도와 숙련도를 확인하지 못했습니다.")
 		return
 	}
 	if !exists {
@@ -1029,10 +1144,15 @@ func ResetCustomGameFavorPositionToDefault(c *gin.Context) {
 	candidate.FlavorMid = 0
 	candidate.FlavorAdc = 0
 	candidate.FlavorSupport = 0
+	candidate.MasteryTop = 0
+	candidate.MasteryJungle = 0
+	candidate.MasteryMid = 0
+	candidate.MasteryAdc = 0
+	candidate.MasterySupport = 0
 	preference, hasPreference, err := models.GetRiotCustomGamePreferenceDAO_byPuuid(tx, req.Puuid)
 	if err != nil {
 		log.Error(err)
-		util.AbortWithStrJson(c, http.StatusInternalServerError, "기본 포지션 선호도를 불러오지 못했습니다.")
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "기본 포지션 선호도와 숙련도를 불러오지 못했습니다.")
 		return
 	}
 	if hasPreference {
@@ -1041,10 +1161,15 @@ func ResetCustomGameFavorPositionToDefault(c *gin.Context) {
 		candidate.FlavorMid = preference.FlavorMid
 		candidate.FlavorAdc = preference.FlavorAdc
 		candidate.FlavorSupport = preference.FlavorSupport
+		candidate.MasteryTop = preference.MasteryTop
+		candidate.MasteryJungle = preference.MasteryJungle
+		candidate.MasteryMid = preference.MasteryMid
+		candidate.MasteryAdc = preference.MasteryAdc
+		candidate.MasterySupport = preference.MasterySupport
 	}
 	if err := candidate.Upsert(tx); err != nil {
 		log.Error(err)
-		util.AbortWithStrJson(c, http.StatusInternalServerError, "기본 포지션 선호도를 적용하지 못했습니다.")
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "기본 포지션 선호도와 숙련도를 적용하지 못했습니다.")
 		return
 	}
 	if err := service.RecalculateCustomGameBalance(tx, req.CustomGameConfigId); err != nil {
@@ -1054,7 +1179,7 @@ func ResetCustomGameFavorPositionToDefault(c *gin.Context) {
 	}
 	if err := tx.Commit(); err != nil {
 		log.Error(err)
-		util.AbortWithStrJson(c, http.StatusInternalServerError, "기본 포지션 선호도를 적용하지 못했습니다.")
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "기본 포지션 선호도와 숙련도를 적용하지 못했습니다.")
 		return
 	}
 
@@ -1457,6 +1582,10 @@ func OptimizeCustomGameConfiguration(c *gin.Context) {
 		util.AbortWithStrJson(c, http.StatusBadRequest, "balance weights must sum to 1")
 		return
 	}
+	if req.MasteryInfluenceWeight == nil || *req.MasteryInfluenceWeight < 0 || *req.MasteryInfluenceWeight > 1 {
+		util.AbortWithStrJson(c, http.StatusBadRequest, "invalid mastery influence weight")
+		return
+	}
 
 	tx, err := db.Root.BeginTxx(c, nil)
 	if err != nil {
@@ -1469,6 +1598,7 @@ func OptimizeCustomGameConfiguration(c *gin.Context) {
 	customGameConfigurationDAO.LineFairnessWeight = *req.LineFairnessWeight
 	customGameConfigurationDAO.TierFairnessWeight = *req.TierFairnessWeight
 	customGameConfigurationDAO.LineSatisfactionWeight = *req.LineSatisfactionWeight
+	customGameConfigurationDAO.MasteryInfluenceWeight = *req.MasteryInfluenceWeight
 	if err := customGameConfigurationDAO.Upsert(tx); err != nil {
 		log.Error(err)
 		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")

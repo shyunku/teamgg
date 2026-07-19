@@ -807,7 +807,29 @@ func calculateCustomGameConfigFairness(
 			continue
 		}
 
-		rating := float64(participant.GetRepresentativeRatingPoint())
+		masteryLevel := 0
+		switch participant.Position {
+		case types.PositionTop:
+			masteryLevel = participant.PositionMastery.Top
+		case types.PositionJungle:
+			masteryLevel = participant.PositionMastery.Jungle
+		case types.PositionMid:
+			masteryLevel = participant.PositionMastery.Mid
+		case types.PositionAdc:
+			masteryLevel = participant.PositionMastery.Adc
+		case types.PositionSupport:
+			masteryLevel = participant.PositionMastery.Support
+		}
+		// Levels 0 through 5 cover the full -20% through +20% range evenly.
+		// The default level 0 is therefore treated as the lowest mastery level.
+		if masteryLevel < 0 {
+			masteryLevel = 0
+		} else if masteryLevel > 5 {
+			masteryLevel = 5
+		}
+		masteryAdjustment := -0.20 + float64(masteryLevel)*0.08
+		rating := float64(participant.GetRepresentativeRatingPoint()) *
+			(1 + masteryAdjustment*weights.MasteryInfluence)
 		teamRating[participant.Team] += rating
 		positionRating[participant.Position][participant.Team] = rating
 		positionOccupied[participant.Position][participant.Team] = true

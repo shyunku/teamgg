@@ -1,6 +1,7 @@
 package models
 
 import (
+	"github.com/jmoiron/sqlx"
 	"team.gg-server/libs/db"
 	"time"
 )
@@ -20,6 +21,7 @@ type CustomGameConfigurationDAO struct {
 	LineFairnessWeight     float64 `db:"line_fairness_weight" json:"lineFairnessWeight"`
 	TierFairnessWeight     float64 `db:"tier_fairness_weight" json:"tierFairnessWeight"`
 	LineSatisfactionWeight float64 `db:"line_satisfaction_weight" json:"lineSatisfactionWeight"`
+	MasteryInfluenceWeight float64 `db:"mastery_influence_weight" json:"masteryInfluenceWeight"`
 
 	TopInfluenceWeight     float64 `db:"top_influence_weight" json:"topInfluenceWeight"`
 	JungleInfluenceWeight  float64 `db:"jungle_influence_weight" json:"jungleInfluenceWeight"`
@@ -32,10 +34,10 @@ func (c *CustomGameConfigurationDAO) Upsert(db db.Context) error {
 	if _, err := db.Exec(`
 	INSERT INTO custom_game_configurations (
 		id, name, creator_uid, created_at, last_updated_at, is_public, fairness, line_fairness, tier_fairness, line_satisfaction,
-		line_fairness_weight, tier_fairness_weight, line_satisfaction_weight,
+		line_fairness_weight, tier_fairness_weight, line_satisfaction_weight, mastery_influence_weight,
 		top_influence_weight, jungle_influence_weight, mid_influence_weight, adc_influence_weight, support_influence_weight
 	) VALUES (
-		?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+		?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 	) ON DUPLICATE KEY UPDATE
 	    name = ?,
 		last_updated_at = ?,
@@ -47,16 +49,17 @@ func (c *CustomGameConfigurationDAO) Upsert(db db.Context) error {
 		line_fairness_weight = ?,
 		tier_fairness_weight = ?,
 		line_satisfaction_weight = ?,
+		mastery_influence_weight = ?,
 		top_influence_weight = ?,
 		jungle_influence_weight = ?,
 		mid_influence_weight = ?,
 		adc_influence_weight = ?,
 		support_influence_weight = ?`,
 		c.Id, c.Name, c.CreatorUid, c.CreatedAt, c.LastUpdatedAt, c.IsPublic, c.Fairness, c.LineFairness, c.TierFairness, c.LineSatisfaction,
-		c.LineFairnessWeight, c.TierFairnessWeight, c.LineSatisfactionWeight,
+		c.LineFairnessWeight, c.TierFairnessWeight, c.LineSatisfactionWeight, c.MasteryInfluenceWeight,
 		c.TopInfluenceWeight, c.JungleInfluenceWeight, c.MidInfluenceWeight, c.AdcInfluenceWeight, c.SupportInfluenceWeight,
 		c.Name, c.LastUpdatedAt, c.IsPublic, c.Fairness, c.LineFairness, c.TierFairness, c.LineSatisfaction,
-		c.LineFairnessWeight, c.TierFairnessWeight, c.LineSatisfactionWeight,
+		c.LineFairnessWeight, c.TierFairnessWeight, c.LineSatisfactionWeight, c.MasteryInfluenceWeight,
 		c.TopInfluenceWeight, c.JungleInfluenceWeight, c.MidInfluenceWeight, c.AdcInfluenceWeight, c.SupportInfluenceWeight,
 	); err != nil {
 		return err
@@ -69,6 +72,36 @@ func GetCustomGameDAOs_byCreatorUid(db db.Context, uid string) ([]CustomGameConf
 	if err := db.Select(&customGameDAOs, `
 		SELECT * FROM custom_game_configurations WHERE creator_uid = ?
 	`, uid); err != nil {
+		return nil, err
+	}
+	return customGameDAOs, nil
+}
+
+func GetCustomGameDAOs_byParticipantPuuids(database db.Context, creatorUid string, puuids []string) ([]CustomGameConfigurationDAO, error) {
+	customGameDAOs := make([]CustomGameConfigurationDAO, 0)
+	if len(puuids) == 0 {
+		return customGameDAOs, nil
+	}
+
+	query, args, err := sqlx.In(`
+		SELECT DISTINCT configuration.*
+		FROM custom_game_configurations configuration
+		WHERE configuration.creator_uid <> ?
+		  AND configuration.id IN (
+			SELECT custom_game_config_id
+			FROM custom_game_candidates
+			WHERE puuid IN (?)
+			UNION
+			SELECT custom_game_config_id
+			FROM custom_game_participants
+			WHERE puuid IN (?)
+		)
+		ORDER BY configuration.last_updated_at DESC
+	`, creatorUid, puuids, puuids)
+	if err != nil {
+		return nil, err
+	}
+	if err := database.Select(&customGameDAOs, database.Rebind(query), args...); err != nil {
 		return nil, err
 	}
 	return customGameDAOs, nil
