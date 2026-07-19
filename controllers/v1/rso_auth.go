@@ -17,6 +17,8 @@ import (
 	"team.gg-server/libs/crypto"
 	"team.gg-server/libs/db"
 	"team.gg-server/models"
+	"team.gg-server/service"
+	riotapi "team.gg-server/third_party/riot/api"
 	"team.gg-server/util"
 )
 
@@ -51,6 +53,8 @@ type rsoState struct {
 type rsoSetup struct {
 	Puuid       string `json:"puuid"`
 	DisplayName string `json:"displayName"`
+	GameName    string `json:"gameName,omitempty"`
+	TagLine     string `json:"tagLine,omitempty"`
 }
 
 type rsoTokenResponse struct {
@@ -176,6 +180,7 @@ func RsoLogin(c *gin.Context) {
 		renderRsoResult(c, false, "Riot 계정 정보를 확인하지 못했습니다.")
 		return
 	}
+	renewRsoLolSummoner(account)
 
 	displayName := riotDisplayName(account)
 	if loginState.Mode == rsoModeLink {
@@ -203,7 +208,12 @@ func RsoLogin(c *gin.Context) {
 	}
 	if !exists {
 		setupToken := uuid.NewString()
-		setupRaw, _ := json.Marshal(rsoSetup{Puuid: account.Puuid, DisplayName: displayName})
+		setupRaw, _ := json.Marshal(rsoSetup{
+			Puuid:       account.Puuid,
+			DisplayName: displayName,
+			GameName:    account.GameName,
+			TagLine:     account.TagLine,
+		})
 		if err := db.InMemoryDB.SetExp(rsoSetupKeyPrefix+setupToken, string(setupRaw), 5*time.Minute); err != nil {
 			failRsoFlow(loginState.FlowId, "로그인 설정을 저장하지 못했습니다.")
 			renderRsoResult(c, false, "로그인 설정을 저장하지 못했습니다.")
@@ -303,6 +313,25 @@ func riotDisplayName(account *riotAccountResponse) string {
 	return displayName
 }
 
+func renewRsoLolSummoner(account *riotAccountResponse) {
+	apiAccount, _, err := riotapi.GetAccountByRiotId(account.GameName, account.TagLine)
+	if err != nil {
+		log.Warnf("RSO Riot ID could not be resolved with the Riot API key: %v", err)
+		return
+	}
+	if _, _, err := service.RenewSummonerInfoByPuuid(db.Root, apiAccount.Puuid); err != nil {
+		log.Warnf("RSO account is not confirmed as a KR LoL account: %v", err)
+	}
+}
+
+func splitRiotDisplayName(displayName string) (string, string, bool) {
+	separator := strings.LastIndex(displayName, "#")
+	if separator <= 0 || separator >= len(displayName)-1 {
+		return "", "", false
+	}
+	return displayName[:separator], displayName[separator+1:], true
+}
+
 func createRiotOnlyUser(c *gin.Context, setup rsoSetup) (*models.UserDAO, error) {
 	uid := uuid.NewSHA1(uuid.NameSpaceURL, []byte("team.gg:riot:"+setup.Puuid)).String()
 	compactUid := strings.ReplaceAll(uid, "-", "")
@@ -391,7 +420,11 @@ func RsoCompleteExisting(c *gin.Context) {
 		util.AbortWithStrJson(c, http.StatusUnauthorized, "아이디 또는 비밀번호가 일치하지 않습니다.")
 		return
 	}
-	account := &riotAccountResponse{Puuid: setup.Puuid, GameName: setup.DisplayName}
+	gameName, tagLine := setup.GameName, setup.TagLine
+	if gameName == "" || tagLine == "" {
+		gameName, tagLine, _ = splitRiotDisplayName(setup.DisplayName)
+	}
+	account := &riotAccountResponse{Puuid: setup.Puuid, GameName: gameName, TagLine: tagLine}
 	if err := linkRiotIdentity(c, userDAO.Uid, account, false); err != nil {
 		util.AbortWithStrJson(c, http.StatusConflict, err.Error())
 		return
@@ -521,6 +554,20 @@ func GetMyAccount(c *gin.Context) {
 	if connected {
 		rsoInfo["displayName"] = identity.DisplayName
 		displayName = identity.DisplayName
+		gameName, tagLine, validRiotId := splitRiotDisplayName(identity.DisplayName)
+		if summoner, isLolAccount, summonerErr := models.GetSummonerDAO_byNameTag(db.Root, gameName, tagLine); summonerErr != nil {
+			log.Error(summonerErr)
+			util.AbortWithStrJson(c, http.StatusInternalServerError, "Riot 계정 정보를 확인하지 못했습니다.")
+			return
+		} else if validRiotId && isLolAccount {
+			rsoInfo["gameName"] = summoner.GameName
+			rsoInfo["tagLine"] = summoner.TagLine
+			rsoInfo["profileIconId"] = summoner.ProfileIconId
+			rsoInfo["isLolAccount"] = true
+			displayName = fmt.Sprintf("%s#%s", summoner.GameName, summoner.TagLine)
+		} else {
+			rsoInfo["isLolAccount"] = false
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"uid": userDAO.Uid, "userId": userDAO.UserId, "displayName": displayName, "riot": rsoInfo})
 }

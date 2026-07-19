@@ -8,6 +8,8 @@ import (
 	"math/rand"
 	"net/http"
 	"sort"
+	"strings"
+	"sync"
 	"team.gg-server/controllers/socket"
 	"team.gg-server/libs/db"
 	"team.gg-server/models"
@@ -16,7 +18,49 @@ import (
 	"team.gg-server/types"
 	"team.gg-server/util"
 	"time"
+	"unicode/utf8"
 )
+
+type summonerMatchesRefreshJob struct {
+	configId string
+	puuid    string
+}
+
+var (
+	summonerMatchesRefreshQueue   = make(chan summonerMatchesRefreshJob, 100)
+	summonerMatchesRefreshOnce    sync.Once
+	pendingSummonerMatchesRefresh sync.Map
+)
+
+func queueSummonerMatchesRefresh(configId, puuid string) {
+	jobKey := configId + ":" + puuid
+	if _, loaded := pendingSummonerMatchesRefresh.LoadOrStore(jobKey, struct{}{}); loaded {
+		return
+	}
+
+	summonerMatchesRefreshOnce.Do(func() {
+		go func() {
+			for job := range summonerMatchesRefreshQueue {
+				key := job.configId + ":" + job.puuid
+				if err := service.RenewSummonerMatches(db.Root, job.puuid, nil); err != nil {
+					log.Warnf("background match refresh failed: %v", err)
+				} else if err := service.RecalculateCustomGameBalance(db.Root, job.configId); err != nil {
+					log.Warnf("background custom game balance refresh failed: %v", err)
+				} else {
+					socket.SocketIO.BroadcastToCustomConfigRoom(job.configId, socket.EventCustomConfigUpdated, nil)
+				}
+				pendingSummonerMatchesRefresh.Delete(key)
+			}
+		}()
+	})
+
+	select {
+	case summonerMatchesRefreshQueue <- summonerMatchesRefreshJob{configId: configId, puuid: puuid}:
+	default:
+		pendingSummonerMatchesRefresh.Delete(jobKey)
+		log.Warn("summoner matches refresh queue is full")
+	}
+}
 
 func UseCustomGameRouter(r *gin.RouterGroup) {
 	g := r.Group("/custom-game")
@@ -24,6 +68,7 @@ func UseCustomGameRouter(r *gin.RouterGroup) {
 	g.GET("/list", GetCustomGameConfigurationList)
 	g.GET("/info", GetCustomGameConfiguration)
 	g.POST("/create", CreateCustomGameConfiguration)
+	g.PATCH("/name", UpdateCustomGameConfigurationName)
 
 	g.GET("/tier-rank", GetTierRank)
 	g.GET("/balance", GetCustomConfigurationBalance)
@@ -106,8 +151,30 @@ func CreateCustomGameConfiguration(c *gin.Context) {
 		return
 	}
 
+	ownerName := userDAO.UserId
+	if identity, connected, identityErr := models.GetUserIdentityDAO_byUid(db.Root, models.UserIdentityProviderRiot, uid); identityErr != nil {
+		log.Error(identityErr)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
+		return
+	} else if connected {
+		separator := strings.LastIndex(identity.DisplayName, "#")
+		if separator <= 0 || separator >= len(identity.DisplayName)-1 {
+			// Keep the team.gg id when the stored Riot display name is invalid.
+		} else if summoner, isLolAccount, summonerErr := models.GetSummonerDAO_byNameTag(
+			db.Root,
+			identity.DisplayName[:separator],
+			identity.DisplayName[separator+1:],
+		); summonerErr != nil {
+			log.Error(summonerErr)
+			util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
+			return
+		} else if isLolAccount {
+			ownerName = fmt.Sprintf("%s#%s", summoner.GameName, summoner.TagLine)
+		}
+	}
+
 	var name string
-	namePrefix := fmt.Sprintf("%s의 내전 팀 구성", userDAO.UserId)
+	namePrefix := fmt.Sprintf("%s의 내전 팀 구성", ownerName)
 	nameSuffix := 1
 
 	configMapByName := make(map[string]bool)
@@ -152,6 +219,46 @@ func CreateCustomGameConfiguration(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, newId)
+}
+
+func UpdateCustomGameConfigurationName(c *gin.Context) {
+	var req UpdateCustomGameConfigurationNameRequestDto
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.AbortWithStrJson(c, http.StatusBadRequest, "invalid request")
+		return
+	}
+
+	name := strings.TrimSpace(req.Name)
+	if name == "" || utf8.RuneCountInString(name) > 100 {
+		util.AbortWithStrJson(c, http.StatusBadRequest, "invalid name")
+		return
+	}
+
+	uid := c.GetString("uid")
+	configuration, exists, err := models.GetCustomGameDAO_byId(db.Root, req.Id)
+	if err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	if !exists {
+		util.AbortWithStrJson(c, http.StatusNotFound, "custom game configuration not found")
+		return
+	}
+	if configuration.CreatorUid != uid {
+		util.AbortWithStrJson(c, http.StatusForbidden, "user is not creator of custom game")
+		return
+	}
+
+	updatedAt := time.Now()
+	if err := models.UpdateCustomGameConfigurationName(db.Root, req.Id, name, updatedAt); err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	socket.SocketIO.MulticastToCustomConfigRoom(req.Id, uid, socket.EventCustomConfigUpdated, nil)
+	c.JSON(http.StatusOK, gin.H{"name": name, "lastUpdatedAt": updatedAt})
 }
 
 func GetTierRank(c *gin.Context) {
@@ -243,6 +350,7 @@ func AddCandidateToCustomGameConfiguration(c *gin.Context) {
 
 		account, status, err := api.GetAccountByRiotId(req.Name, req.TagLine)
 		if err != nil {
+			_ = tx.Rollback()
 			if status == http.StatusNotFound {
 				util.AbortWithStrJson(c, http.StatusNotFound, "invalid game name")
 				return
@@ -252,7 +360,20 @@ func AddCandidateToCustomGameConfiguration(c *gin.Context) {
 			return
 		}
 
-		if err := service.RenewSummonerTotal(tx, account.Puuid); err != nil {
+		summonerDAO, _, err = service.RenewSummonerInfoByPuuid(tx, account.Puuid)
+		if err != nil {
+			log.Error(err)
+			_ = tx.Rollback()
+			util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		if err := service.RenewSummonerLeague(tx, summonerDAO.Puuid); err != nil {
+			log.Error(err)
+			_ = tx.Rollback()
+			util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		if err := service.RenewSummonerMastery(tx, summonerDAO.Puuid); err != nil {
 			log.Error(err)
 			_ = tx.Rollback()
 			util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
@@ -319,6 +440,7 @@ func AddCandidateToCustomGameConfiguration(c *gin.Context) {
 		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
 		return
 	}
+	queueSummonerMatchesRefresh(req.CustomGameConfigId, newCandidateDAO.Puuid)
 
 	socket.SocketIO.MulticastToCustomConfigRoom(req.CustomGameConfigId, uid, socket.EventCustomConfigUpdated, nil)
 	c.JSON(http.StatusOK, candidateVO)
@@ -350,10 +472,36 @@ func DeleteCandidateFromCustomGameConfiguration(c *gin.Context) {
 		return
 	}
 
-	// delete candidate
-	if err := models.DeleteCustomGameCandidateDAO_byPuuid(db.Root, req.CustomGameConfigId, req.Puuid); err != nil {
+	tx, err := db.Root.BeginTxx(c, nil)
+	if err != nil {
 		log.Error(err)
 		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	rollback := func(err error) {
+		log.Error(err)
+		_ = tx.Rollback()
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
+	}
+
+	if err := models.DeleteCustomGameParticipantColorLabelDAO_byPuuid(tx, req.CustomGameConfigId, req.Puuid); err != nil {
+		rollback(err)
+		return
+	}
+	if err := models.DeleteCustomGameParticipantDAO_byPuuid(tx, req.CustomGameConfigId, req.Puuid); err != nil {
+		rollback(err)
+		return
+	}
+	if err := models.DeleteCustomGameCandidateDAO_byPuuid(tx, req.CustomGameConfigId, req.Puuid); err != nil {
+		rollback(err)
+		return
+	}
+	if err := service.RecalculateCustomGameBalance(tx, req.CustomGameConfigId); err != nil {
+		rollback(err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		rollback(err)
 		return
 	}
 

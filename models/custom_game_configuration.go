@@ -83,3 +83,12 @@ func GetCustomGameDAO_byId(db db.Context, id string) (*CustomGameConfigurationDA
 	}
 	return &customGameDAO, true, nil
 }
+
+func UpdateCustomGameConfigurationName(db db.Context, id, name string, updatedAt time.Time) error {
+	_, err := db.Exec(`
+		UPDATE custom_game_configurations
+		SET name = ?, last_updated_at = ?
+		WHERE id = ?
+	`, name, updatedAt, id)
+	return err
+}

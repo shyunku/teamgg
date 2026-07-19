@@ -10,6 +10,11 @@ type GetCustomGameConfigurationRequestDto struct {
 
 type GetCustomGameConfigurationResponseDto service.CustomGameConfigurationVO
 
+type UpdateCustomGameConfigurationNameRequestDto struct {
+	Id   string `json:"id" binding:"required"`
+	Name string `json:"name" binding:"required"`
+}
+
 type GetTierRankRequestDto struct {
 	RatingPoint *float64 `form:"ratingPoint" binding:"required"`
 }

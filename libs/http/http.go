@@ -39,7 +39,7 @@ func Get(req GetRequest) (Response, error) {
 	if EnableDebug {
 		log.Debugf("[HTTP] GET --> %s", req.Url)
 	}
-	resp, err := http.Get(req.Url)
+	resp, err := getWithRiotPolicy(req.Url)
 	if err != nil {
 		return respBody, err
 	}
@@ -73,7 +73,7 @@ func StreamGet(req GetRequest) (Response, error) {
 	if EnableDebug {
 		log.Debugf("[HTTP] GET --> %s", req.Url)
 	}
-	resp, err := http.Get(req.Url)
+	resp, err := getWithRiotPolicy(req.Url)
 	if err != nil {
 		return respBody, err
 	}
@@ -88,6 +88,7 @@ func StreamGet(req GetRequest) (Response, error) {
 		}
 	} else {
 		bodyContent, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
 		if err != nil {
 			return respBody, err
 		}
