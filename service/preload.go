@@ -44,6 +44,12 @@ var (
 		if err := models.EnsureCustomGameLineMasterySchema(db); err != nil {
 			return err
 		}
+		if err := models.EnsureDataExplorerSchema(db); err != nil {
+			return err
+		}
+		if err := models.EnsureStatisticsSnapshotSchema(db); err != nil {
+			return err
+		}
 
 		// find static data tables
 		var staticTierRankTable interface{}

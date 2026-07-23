@@ -1,12 +1,15 @@
 package service
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
-	"github.com/jmoiron/sqlx"
 	log "github.com/shyunku-libraries/go-logger"
 	"math"
+	"math/rand"
 	"net/http"
 	"team.gg-server/controllers/socket"
 	"team.gg-server/core"
@@ -18,34 +21,37 @@ import (
 	"time"
 )
 
-// RenewSummonerTotal updates summoner info, league, mastery, matches
-// you should use db context with transaction (to prevent inconsistency)
-func RenewSummonerTotal(tx *sqlx.Tx, puuid string) error {
+var ErrRiotIdentityNotFound = errors.New("riot identity not found")
+
+// RenewSummonerTotal updates summoner info, league, mastery and matches without
+// holding a database transaction across Riot API calls. Each immutable match is
+// persisted by SaveDataExplorerMatch in its own short transaction.
+func RenewSummonerTotal(puuid string) error {
 	if core.DebugOnProd {
 		defer util.InspectFunctionExecutionTime()()
 	}
 
 	// update summoner info
-	summonerDAO, _, err := RenewSummonerInfoByPuuid(tx, puuid)
+	summonerDAO, _, err := RenewSummonerInfoByPuuid(db.Root, puuid)
 	if err != nil {
 		log.Error(err)
 		return err
 	}
 
 	// update summoner league
-	if err := RenewSummonerLeague(tx, summonerDAO.Puuid); err != nil {
+	if err := RenewSummonerLeague(db.Root, summonerDAO.Puuid); err != nil {
 		log.Error(err)
 		return err
 	}
 
 	// update summoner mastery
-	if err := RenewSummonerMastery(tx, summonerDAO.Puuid); err != nil {
+	if err := RenewSummonerMastery(db.Root, summonerDAO.Puuid); err != nil {
 		log.Error(err)
 		return err
 	}
 
 	// update summoner recent matches
-	if err := RenewSummonerMatches(tx, summonerDAO.Puuid, nil); err != nil {
+	if err := RenewSummonerMatches(db.Root, summonerDAO.Puuid, nil); err != nil {
 		log.Error(err)
 		return err
 	}
@@ -56,19 +62,19 @@ func RenewSummonerTotal(tx *sqlx.Tx, puuid string) error {
 func RenewSummonerInfoByPuuid(db db.Context, puuid string) (*models.SummonerDAO, bool, error) {
 	summoner, status, err := api.GetSummonerByPuuid(puuid)
 	if err != nil {
-		log.Error(err)
 		if status == http.StatusNotFound {
-			return nil, false, fmt.Errorf("summoner not found with puuid (%s)", puuid)
+			return nil, false, fmt.Errorf("%w: summoner not found with puuid (%s)", ErrRiotIdentityNotFound, puuid)
 		}
+		log.Error(err)
 		return nil, true, err
 	}
 
 	account, status, err := api.GetAccountByPuuid(puuid)
 	if err != nil {
-		log.Error(err)
 		if status == http.StatusNotFound {
-			return nil, false, fmt.Errorf("account not found with puuid (%s)", puuid)
+			return nil, false, fmt.Errorf("%w: account not found with puuid (%s)", ErrRiotIdentityNotFound, puuid)
 		}
+		log.Error(err)
 		return nil, true, err
 	}
 
@@ -242,7 +248,7 @@ func RenewSummonerMatchesIfNecessary(db db.Context, puuid string, matchIdList []
 		//}
 
 		for _, match := range uncachedMatches {
-			if err := saveMatchToLocalDB(db, puuid, match); err != nil {
+			if err := SaveDataExplorerMatch(match, []string{puuid}); err != nil {
 				log.Error(err)
 				return err
 			}
@@ -289,7 +295,7 @@ func saveMatchToLocalDB(db db.Context, puuid string, match api.MatchDto) error {
 		TournamentCode:     match.Info.TournamentCode,
 	}
 	if err := matchDAO.Insert(db); err != nil {
-		log.Error(err)
+		logMatchPersistenceError(err)
 		return err
 	}
 
@@ -304,7 +310,7 @@ func saveMatchToLocalDB(db db.Context, puuid string, match api.MatchDto) error {
 				MatchId: matchId,
 			}
 			if err := summonerMatchEntity.Upsert(db); err != nil {
-				log.Error(err)
+				logMatchPersistenceError(err)
 				return err
 			}
 		}
@@ -375,7 +381,13 @@ func saveMatchToLocalDB(db db.Context, puuid string, match api.MatchDto) error {
 			TeamEarlySurrendered:           p.TeamEarlySurrendered,
 		}
 		if err := matchParticipantEntity.Insert(db); err != nil {
-			log.Error(err)
+			logMatchPersistenceError(err)
+			return err
+		}
+
+		fromMatchId := matchId
+		if err := models.EnqueueDataExplorerSummonerJob(db, p.Puuid, -10, 1, &fromMatchId); err != nil {
+			logMatchPersistenceError(err)
 			return err
 		}
 
@@ -429,7 +441,7 @@ func saveMatchToLocalDB(db db.Context, puuid string, match api.MatchDto) error {
 			WardsPlaced:                    p.WardsPlaced,
 		}
 		if err := matchParticipantDetailEntity.Insert(db); err != nil {
-			log.Error(err)
+			logMatchPersistenceError(err)
 			return err
 		}
 
@@ -441,7 +453,7 @@ func saveMatchToLocalDB(db db.Context, puuid string, match api.MatchDto) error {
 			StatPerkOffense:    p.Perks.StatPerks.Offense,
 		}
 		if err := matchParticipantPerkEntity.InsertTx(db); err != nil {
-			log.Error(err)
+			logMatchPersistenceError(err)
 			return err
 		}
 
@@ -455,7 +467,7 @@ func saveMatchToLocalDB(db db.Context, puuid string, match api.MatchDto) error {
 				Style:              style.Style,
 			}
 			if err := matchParticipantPerkStyleEntity.Insert(db); err != nil {
-				log.Error(err)
+				logMatchPersistenceError(err)
 				return err
 			}
 
@@ -469,7 +481,7 @@ func saveMatchToLocalDB(db db.Context, puuid string, match api.MatchDto) error {
 					Var3:    selection.Var3,
 				}
 				if err := matchParticipantPerkStyleSelectionEntity.Insert(db); err != nil {
-					log.Error(err)
+					logMatchPersistenceError(err)
 					return err
 				}
 			}
@@ -496,7 +508,7 @@ func saveMatchToLocalDB(db db.Context, puuid string, match api.MatchDto) error {
 			TowerKills:      t.Objectives.Tower.Kills,
 		}
 		if err := matchTeamEntity.Insert(db); err != nil {
-			log.Error(err)
+			logMatchPersistenceError(err)
 			return err
 		}
 
@@ -509,13 +521,74 @@ func saveMatchToLocalDB(db db.Context, puuid string, match api.MatchDto) error {
 				PickTurn:   ban.PickTurn,
 			}
 			if err := matchTeamBanEntity.Insert(db); err != nil {
-				log.Error(err)
+				logMatchPersistenceError(err)
 				return err
 			}
 		}
 	}
 
 	return nil
+}
+
+// SaveDataExplorerMatch stores exactly one match in a short transaction. Riot
+// network calls must be completed before entering this function.
+func SaveDataExplorerMatch(match api.MatchDto, sourcePuuids []string) error {
+	const maxAttempts = 5
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		tx, err := db.Root.BeginTxx(context.Background(), &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+		if err != nil {
+			return err
+		}
+
+		matchId := match.Metadata.MatchId
+		_, exists, err := models.GetMatchDAO(tx, matchId)
+		if err == nil && !exists {
+			// Sources are connected below. Passing an empty PUUID avoids writing the
+			// same summoner_matches relation twice on legacy schemas without a key.
+			err = saveMatchToLocalDB(tx, "", match)
+		}
+		if err == nil {
+			for _, puuid := range sourcePuuids {
+				link := models.SummonerMatchDAO{Puuid: puuid, MatchId: matchId}
+				if err = link.Upsert(tx); err != nil {
+					break
+				}
+			}
+		}
+		if err == nil {
+			err = tx.Commit()
+		} else {
+			_ = tx.Rollback()
+		}
+		if err == nil {
+			return nil
+		}
+		_ = tx.Rollback()
+		if !isRetryableDatabaseError(err) || attempt == maxAttempts-1 {
+			return err
+		}
+		time.Sleep(time.Duration(50*(1<<attempt)+rand.Intn(100)) * time.Millisecond)
+	}
+	return nil
+}
+
+func isRetryableDatabaseError(err error) bool {
+	var mysqlErr *mysqlDriver.MySQLError
+	if !errors.As(err, &mysqlErr) {
+		return false
+	}
+	// 1205: lock wait timeout, 1213: deadlock, 1062: another writer won
+	// an idempotent insert race. The complete transaction is retried.
+	return mysqlErr.Number == 1205 || mysqlErr.Number == 1213 || mysqlErr.Number == 1062
+}
+
+func logMatchPersistenceError(err error) {
+	// Transient write races are logged only if all transaction retries fail.
+	// Logging here would otherwise produce scary 1062/1213 messages for a
+	// transaction that successfully converges on the next attempt.
+	if !isRetryableDatabaseError(err) {
+		log.Error(err)
+	}
 }
 
 func renewMatchInLocalDB(db db.Context, puuid string, matchId string) error {

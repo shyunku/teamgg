@@ -36,7 +36,7 @@ func GetTierStatisticsTopRankersMXDAOs(db db.Context, topRanks int) ([]*TierStat
 				l.losses,
 				ROW_NUMBER() OVER (
 					PARTITION BY l.queue_type, l.tier, l.league_rank
-					ORDER BY l.league_points DESC, l.wins, l.losses
+					ORDER BY l.league_points DESC, l.wins DESC, l.losses ASC
 				) AS ranks
 			FROM leagues l
 			WHERE l.queue_type = 'RANKED_SOLO_5x5' OR l.queue_type = 'RANKED_FLEX_SR'

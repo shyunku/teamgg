@@ -1,11 +1,10 @@
 package statistics
 
 import (
-	"encoding/json"
+	"context"
 	log "github.com/shyunku-libraries/go-logger"
-	"os"
-	"path"
-	"team.gg-server/core"
+	"sync"
+	"team.gg-server/libs/db"
 	"team.gg-server/models/mixed/statistics_models"
 	"team.gg-server/service"
 	"team.gg-server/util"
@@ -50,14 +49,21 @@ type TierStatistics struct {
 }
 
 type TierStatisticsRepository struct {
-	Cache *TierStatistics
+	mu     sync.RWMutex
+	Cache  *TierStatistics
+	config RunnerConfig
 }
 
-func NewTierStatisticsRepository() *TierStatisticsRepository {
+func NewTierStatisticsRepository(config RunnerConfig) *TierStatisticsRepository {
 	tsr := &TierStatisticsRepository{
-		Cache: nil,
+		Cache:  nil,
+		config: config,
 	}
-	_, _ = tsr.Load()
+	value, err := tsr.Load()
+	if err != nil {
+		log.Warnf("Failed to preload %s: %v", tsr.key(), err)
+	}
+	logLoadedSnapshot(tsr.key(), value)
 	return tsr
 }
 
@@ -66,34 +72,43 @@ func (tsr *TierStatisticsRepository) key() string {
 }
 
 func (tsr *TierStatisticsRepository) Period() time.Duration {
-	if core.DebugMode {
-		return 1 * time.Hour
-	}
-	return 12 * time.Hour
+	return tsr.config.Period
 }
 
-func (tsr *TierStatisticsRepository) Loop() {
-	for {
-		if _, err := tsr.Collect(); err != nil {
-			log.Error(err)
-		}
-		time.Sleep(tsr.Period())
-	}
+func (tsr *TierStatisticsRepository) Loop(ctx context.Context) {
+	runLoop(ctx, tsr.key(), tsr.config, func(ctx context.Context) error {
+		_, err := tsr.collectCoordinated(ctx)
+		return err
+	})
 }
 
 func (tsr *TierStatisticsRepository) Collect() (*TierStatistics, error) {
-	log.Debugf("collecting %s...", tsr.key())
+	return tsr.collectCoordinated(context.Background())
+}
+
+func (tsr *TierStatisticsRepository) collectCoordinated(ctx context.Context) (*TierStatistics, error) {
+	return collectCoordinated(
+		ctx,
+		tsr.key(),
+		tsr.config,
+		tsr.collect,
+		tsr.setCache,
+	)
+}
+
+func (tsr *TierStatisticsRepository) collect(database db.Context) (*TierStatistics, error) {
+	log.Infof("Collecting %s statistics...", tsr.key())
 	timer := util.NewTimerWithName("TierStatisticsRepository")
 	timer.Start()
 
 	// collect data
-	tierCountMXDAOs, err := statistics_models.GetTierStatisticsTierCountMXDAOs(StatisticsDB)
+	tierCountMXDAOs, err := statistics_models.GetTierStatisticsTierCountMXDAOs(database)
 	if err != nil {
 		log.Error(err)
 		return nil, err
 	}
 
-	topRankersMXDAOs, err := statistics_models.GetTierStatisticsTopRankersMXDAOs(StatisticsDB, 30)
+	topRankersMXDAOs, err := statistics_models.GetTierStatisticsTopRankersMXDAOs(database, 30)
 	if err != nil {
 		log.Error(err)
 		return nil, err
@@ -190,75 +205,41 @@ func (tsr *TierStatisticsRepository) Collect() (*TierStatistics, error) {
 		})
 	}
 
-	tsr.Cache = &TierStatistics{
+	collected := &TierStatistics{
 		UpdatedAt:   time.Now(),
 		QueueGroups: queueGroups,
 	}
 
-	log.Debugf("%s data collected successfully in %s", tsr.key(), timer.GetDurationString())
-	if err := tsr.Save(); err != nil {
-		log.Warn(err)
-	}
-
-	return tsr.Cache, nil
+	log.Infof("%s statistics collected successfully in %s", tsr.key(), timer.GetDurationString())
+	return collected, nil
 }
 
 func (tsr *TierStatisticsRepository) Save() error {
-	if tsr.Cache == nil {
-		log.Error("data is nil")
-		return nil
-	}
-
-	// save data
-	jsonData, err := json.Marshal(tsr.Cache)
-	if err != nil {
-		log.Error(err)
-		return err
-	}
-
-	// create directory if not exists
-	if err = os.MkdirAll(path.Join(util.GetProjectRootDirectory(), StatisticsDataPath), 0755); err != nil {
-		log.Error(err)
-		return err
-	}
-
-	filePath := keyPath(tsr.key())
-	err = os.WriteFile(filePath, jsonData, 0644)
-	if err != nil {
-		log.Error(err)
-		return err
-	}
-
-	log.Debugf("%s data saved to %s successfully", tsr.key(), filePath)
-	return nil
+	return saveCurrentSnapshot(tsr.key(), tsr.getCache())
 }
 
 func (tsr *TierStatisticsRepository) Load() (*TierStatistics, error) {
-	if tsr.Cache != nil {
-		return tsr.Cache, nil
+	if cached := tsr.getCache(); cached != nil {
+		return cached, nil
 	}
-
-	// if there is no data, collect and save
-	filePath := keyPath(tsr.key())
-	_, err := os.Stat(filePath)
+	cached, err := loadSnapshot[TierStatistics](tsr.key())
 	if err != nil {
-		log.Error(err)
-		return nil, nil
-	}
-
-	// read file
-	jsonData, err := os.ReadFile(filePath)
-	if err != nil {
-		log.Error(err)
 		return nil, err
 	}
-
-	// unmarshal data
-	err = json.Unmarshal(jsonData, &tsr.Cache)
-	if err != nil {
-		log.Error(err)
-		return nil, err
+	if cached != nil {
+		tsr.setCache(cached)
 	}
+	return cached, nil
+}
 
-	return tsr.Cache, nil
+func (tsr *TierStatisticsRepository) getCache() *TierStatistics {
+	tsr.mu.RLock()
+	defer tsr.mu.RUnlock()
+	return tsr.Cache
+}
+
+func (tsr *TierStatisticsRepository) setCache(cache *TierStatistics) {
+	tsr.mu.Lock()
+	defer tsr.mu.Unlock()
+	tsr.Cache = cache
 }

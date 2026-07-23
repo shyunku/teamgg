@@ -14,10 +14,13 @@ type SummonerMatchDAO struct {
 func (s *SummonerMatchDAO) Upsert(db db.Context) error {
 	if _, err := db.Exec(`
 		INSERT INTO summoner_matches
-		    (puuid, match_id) 
-		VALUES (?, ?) 
+		    (puuid, match_id)
+		SELECT ?, ?
+		WHERE NOT EXISTS (
+			SELECT 1 FROM summoner_matches WHERE puuid = ? AND match_id = ?
+		)
 		ON DUPLICATE KEY UPDATE 
-			puuid = ?, match_id = ?`,
+			puuid = VALUES(puuid), match_id = VALUES(match_id)`,
 		s.Puuid, s.MatchId, s.Puuid, s.MatchId,
 	); err != nil {
 		return err

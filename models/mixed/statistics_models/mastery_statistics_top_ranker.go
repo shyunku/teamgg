@@ -19,25 +19,51 @@ type MasteryStatisticsTopRankersMXDAO struct {
 }
 
 func GetMasteryStatisticsTopRankersMXDAOs(db db.Context, topRanks int) ([]*MasteryStatisticsTopRankersMXDAO, error) {
-	var topRankers []*MasteryStatisticsTopRankersMXDAO
-	if err := db.Select(&topRankers, `
-		WITH RankedMasteries AS (
-			SELECT
-			    puuid,
-				champion_id,
-				champion_points,
-				ROW_NUMBER() OVER (PARTITION BY champion_id ORDER BY champion_points DESC) AS ranks
-			FROM masteries
-		)
-		SELECT s.puuid, s.game_name, s.tag_line, s.profile_icon_id, rm.champion_id, rm.champion_points, rm.ranks
-		FROM RankedMasteries rm
-		LEFT JOIN summoners s ON rm.puuid = s.puuid
-		WHERE ranks <= ?;
-	`, topRanks); err != nil {
+	if topRanks <= 0 {
+		return make([]*MasteryStatisticsTopRankersMXDAO, 0), nil
+	}
+
+	// A ROW_NUMBER() partition over the complete mastery table forces MySQL to
+	// sort every mastery row. Read the small champion key set first, then use
+	// the (champion_id, champion_points DESC) index for a bounded top-N lookup.
+	var championIds []int
+	if err := db.Select(&championIds, `
+		SELECT DISTINCT champion_id
+		FROM masteries
+		ORDER BY champion_id
+	`); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return make([]*MasteryStatisticsTopRankersMXDAO, 0), nil
 		}
 		return nil, err
+	}
+
+	topRankers := make([]*MasteryStatisticsTopRankersMXDAO, 0, len(championIds)*topRanks)
+	for _, championId := range championIds {
+		var championRankers []*MasteryStatisticsTopRankersMXDAO
+		if err := db.Select(&championRankers, `
+			SELECT
+				s.puuid,
+				s.game_name,
+				s.tag_line,
+				s.profile_icon_id,
+				m.champion_id,
+				m.champion_points
+			FROM masteries m
+			LEFT JOIN summoners s ON m.puuid = s.puuid
+			WHERE m.champion_id = ?
+			ORDER BY m.champion_points DESC
+			LIMIT ?
+		`, championId, topRanks); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			return nil, err
+		}
+		for index, ranker := range championRankers {
+			ranker.Ranks = index + 1
+			topRankers = append(topRankers, ranker)
+		}
 	}
 	return topRankers, nil
 }

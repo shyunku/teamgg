@@ -56,14 +56,6 @@ func GetSummonerInfo(c *gin.Context) {
 		return
 	}
 	if !exists {
-		// need to renew summoner
-		tx, err := db.Root.BeginTxx(c, nil)
-		if err != nil {
-			log.Error(err)
-			util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
-			return
-		}
-
 		account, status, err := api.GetAccountByRiotId(req.GameName, tagLine)
 		if err != nil {
 			if status == http.StatusNotFound {
@@ -75,16 +67,8 @@ func GetSummonerInfo(c *gin.Context) {
 			return
 		}
 
-		if err := service.RenewSummonerTotal(tx, account.Puuid); err != nil {
+		if err := service.RenewSummonerTotal(account.Puuid); err != nil {
 			log.Error(err)
-			_ = tx.Rollback()
-			util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
-			return
-		}
-
-		if err := tx.Commit(); err != nil {
-			log.Error(err)
-			_ = tx.Rollback()
 			util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
 			return
 		}
@@ -268,23 +252,8 @@ func RenewSummonerInfo(c *gin.Context) {
 		return
 	}
 
-	tx, err := db.Root.BeginTxx(c, nil)
-	if err != nil {
+	if err := service.RenewSummonerTotal(req.Puuid); err != nil {
 		log.Error(err)
-		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
-		return
-	}
-
-	if err := service.RenewSummonerTotal(tx, req.Puuid); err != nil {
-		log.Error(err)
-		_ = tx.Rollback()
-		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
-		return
-	}
-
-	if err := tx.Commit(); err != nil {
-		log.Error(err)
-		_ = tx.Rollback()
 		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
 		return
 	}

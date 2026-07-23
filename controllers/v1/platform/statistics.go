@@ -70,6 +70,10 @@ func GetChampionStatisticsDetail(c *gin.Context) {
 		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
 		return
 	}
+	if data == nil {
+		util.AbortWithStrJson(c, http.StatusServiceUnavailable, "statistics cache is not ready")
+		return
+	}
 
 	championDetail, exists := data.Data[req.ChampionId]
 	if !exists {
@@ -85,6 +89,10 @@ func GetMetaStatistics(c *gin.Context) {
 	if err != nil {
 		log.Error(err)
 		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	if statistics == nil {
+		util.AbortWithStrJson(c, http.StatusServiceUnavailable, "statistics cache is not ready")
 		return
 	}
 
@@ -155,6 +163,10 @@ func GetTierStatistics(c *gin.Context) {
 		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
 		return
 	}
+	if statistics == nil {
+		util.AbortWithStrJson(c, http.StatusServiceUnavailable, "statistics cache is not ready")
+		return
+	}
 
 	c.JSON(http.StatusOK, statistics)
 }
@@ -164,6 +176,10 @@ func GetMasteryStatistics(c *gin.Context) {
 	if err != nil {
 		log.Error(err)
 		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	if statistics == nil {
+		util.AbortWithStrJson(c, http.StatusServiceUnavailable, "statistics cache is not ready")
 		return
 	}
 

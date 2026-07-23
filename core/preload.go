@@ -3,6 +3,7 @@ package core
 import (
 	log "github.com/shyunku-libraries/go-logger"
 	"os"
+	"strings"
 	core "team.gg-server/util"
 )
 
@@ -11,6 +12,7 @@ var (
 	AppServerPort = os.Getenv("APP_SERVER_PORT")
 	DebugMode     = false
 	DebugOnProd   = false
+	IsProduction  = false
 	UrgentMode    = false
 
 	RsoClientId          = os.Getenv("RSO_CLIENT_ID")
@@ -28,16 +30,21 @@ func Preload() error {
 	}
 
 	// load debug mode
-	DebugMode = os.Getenv("DEBUG") == "true"
+	DebugMode = environmentBool("DEBUG")
+
+	// Environment and diagnostic concerns are intentionally separate. A
+	// production server may temporarily enable DEBUG without exposing
+	// development routes or weakening cookie security.
+	IsProduction = environmentBool("IS_PROD")
 
 	// load debug on prod
-	DebugOnProd = os.Getenv("DEBUG_ON_PRODUCTION") == "true"
+	DebugOnProd = environmentBool("DEBUG_ON_PRODUCTION")
 	if DebugMode {
 		DebugOnProd = true
 	}
 
 	// load urgent mode
-	UrgentMode = os.Getenv("URGENT") == "true"
+	UrgentMode = environmentBool("URGENT")
 
 	AppServerHost = ipv4
 	AppServerPort = os.Getenv("APP_SERVER_PORT")
@@ -48,4 +55,13 @@ func Preload() error {
 
 	log.Debugf("server is active on public ip: %s:%s", AppServerHost, AppServerPort)
 	return nil
+}
+
+func environmentBool(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "1", "true", "on", "yes":
+		return true
+	default:
+		return false
+	}
 }

@@ -7,7 +7,7 @@ import (
 )
 
 func SetAccessTokenCookie(c *gin.Context, token string, refreshTokenExpireDuration int) {
-	secureMode := !core.DebugMode
+	secureMode := core.IsProduction
 	if secureMode {
 		c.SetSameSite(http.SameSiteNoneMode)
 	}
@@ -15,7 +15,7 @@ func SetAccessTokenCookie(c *gin.Context, token string, refreshTokenExpireDurati
 }
 
 func DeleteAccessTokenCookie(c *gin.Context) {
-	secureMode := !core.DebugMode
+	secureMode := core.IsProduction
 	if secureMode {
 		c.SetSameSite(http.SameSiteNoneMode)
 	}

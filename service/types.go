@@ -29,21 +29,21 @@ var (
 		}
 	}
 	GetInitialMatchCount = func() int {
-		if core.DebugMode {
-			return types.LoadInitialMatchCountDev
+		if core.IsProduction {
+			return types.LoadInitialMatchCount
 		}
-		return types.LoadInitialMatchCount
+		return types.LoadInitialMatchCountDev
 	}
 	GetLoadMoreMatchCount = func() int {
-		if core.DebugMode {
-			return types.LoadMoreMatchCountDev
+		if core.IsProduction {
+			return types.LoadMoreMatchCount
 		}
-		return types.LoadMoreMatchCount
+		return types.LoadMoreMatchCountDev
 	}
 	GetDataExplorerLoopPeriod = func() time.Duration {
-		if core.DebugMode {
-			return types.DataExplorerLoopPeriodDev
+		if core.IsProduction {
+			return types.DataExplorerLoopPeriod
 		}
-		return types.DataExplorerLoopPeriod
+		return types.DataExplorerLoopPeriodDev
 	}
 )

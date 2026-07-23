@@ -21,6 +21,7 @@ import (
 var GlobalLogger = log.GetLogger()
 
 func SetupRouter() *gin.Engine {
+	configureGinMode()
 	gin.DefaultWriter = GlobalLogger
 	gin.DefaultErrorWriter = GlobalLogger
 
@@ -50,7 +51,7 @@ func SetupRouter() *gin.Engine {
 
 	// platform routes
 	v1.UseV1Router(r)
-	if core.DebugMode {
+	if !core.IsProduction {
 		test.UseTestRouter(r)
 	}
 	socket.UseSocket(r)
@@ -63,10 +64,22 @@ func SetupRouter() *gin.Engine {
 	return r
 }
 
+func configureGinMode() {
+	// Preserve the explicit test mode selected by controller tests.
+	if gin.Mode() == gin.TestMode {
+		return
+	}
+	if core.IsProduction {
+		gin.SetMode(gin.ReleaseMode)
+		return
+	}
+	gin.SetMode(gin.DebugMode)
+}
+
 func serverVersion(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"version":      core.Version,
-		"isProduction": !core.DebugMode,
+		"isProduction": core.IsProduction,
 	})
 }
 
@@ -92,16 +105,10 @@ func RunGin(ctx context.Context, waitGroup *sync.WaitGroup) {
 		waitGroup.Done()
 	}()
 
-	// 서버 시작
-	if core.DebugMode || true {
-		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-			log.Fatal(err)
-			os.Exit(-3)
-		}
-	} else {
-		if err := srv.ListenAndServeTLS("certificates/cert.pem", "certificates/key.pem"); !errors.Is(err, http.ErrServerClosed) {
-			log.Fatal(err)
-			os.Exit(-3)
-		}
+	// TLS is terminated by the deployment proxy. Environment selection must
+	// not silently change the server transport.
+	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+		log.Fatal(err)
+		os.Exit(-3)
 	}
 }

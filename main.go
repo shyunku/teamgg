@@ -7,6 +7,7 @@ import (
 	log "github.com/shyunku-libraries/go-logger"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"sync"
 	"team.gg-server/controllers"
 	"team.gg-server/core"
@@ -40,7 +41,12 @@ func main() {
 
 	// Load environment variables
 	log.Info("Initializing environments...")
-	if err := godotenv.Load(); err != nil {
+	environmentPath, pathErr := filepath.Abs(".env")
+	if pathErr != nil {
+		environmentPath = ".env"
+	}
+	log.Infof("Loading environment file: %s", environmentPath)
+	if err := godotenv.Load(environmentPath); err != nil {
 		log.Error(err)
 		os.Exit(-1)
 	}
@@ -61,6 +67,7 @@ func main() {
 		"RSO_CLIENT_SECRET",
 		"RSO_CLIENT_CALLBACK_URI",
 		"DEBUG",
+		"IS_PROD",
 	}); err != nil {
 		log.Error(err)
 		os.Exit(-1)
@@ -77,6 +84,11 @@ func main() {
 		log.Error(err)
 		os.Exit(-5)
 	}
+	// Each statistics repository holds at most one dedicated connection while
+	// collecting. Keep this analytical pool bounded instead of inheriting the
+	// general-purpose 100-connection default.
+	statistics.StatisticsDB.SetMaxIdleConns(3)
+	statistics.StatisticsDB.SetMaxOpenConns(4)
 
 	// preload
 	if err := core.Preload(); err != nil {
@@ -91,10 +103,13 @@ func main() {
 	}
 
 	// print debug state
-	if core.DebugMode {
-		log.Debug("Running in debug mode...")
-	} else {
+	if core.IsProduction {
 		log.Info("Running in production mode...")
+	} else {
+		log.Info("Running in development mode...")
+	}
+	if core.DebugMode {
+		log.Info("Debug diagnostics are enabled...")
 	}
 
 	// Init in-memory database
@@ -119,13 +134,23 @@ func main() {
 
 	// initialize statistics repository
 	log.Info("Initializing statistics repository...")
-	statistics.InitializeStatisticRepos()
+	if err := statistics.InitializeStatisticRepos(); err != nil {
+		log.Error(err)
+		os.Exit(-6)
+	}
 
 	// start statistics repository loop
 	log.Info("Starting statistics repository loops...")
-	//	go statistics.ChampionDetailStatisticsRepo.Loop()
-	//	go statistics.TierStatisticsRepo.Loop()
-	//	go statistics.MasteryStatisticsRepo.Loop()
+	startStatisticsLoop := func(loop func(context.Context)) {
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			loop(ctx)
+		}()
+	}
+	startStatisticsLoop(statistics.ChampionDetailStatisticsRepo.Loop)
+	startStatisticsLoop(statistics.TierStatisticsRepo.Loop)
+	startStatisticsLoop(statistics.MasteryStatisticsRepo.Loop)
 
 	// Run web server with gin
 	waitGroup.Add(1)

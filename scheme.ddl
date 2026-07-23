@@ -242,6 +242,12 @@ create index match_teams_team_id_index
 create index matches_game_end_timestamp_index
     on teamgg.matches (game_end_timestamp);
 
+create index matches_game_version_index
+    on teamgg.matches (game_version);
+
+create index match_team_bans_champion_id_index
+    on teamgg.match_team_bans (champion_id);
+
 create index matches_game_start_timestamp_index
     on teamgg.matches (game_start_timestamp);
 
@@ -371,6 +377,7 @@ create table teamgg.summoner_matches
 (
     puuid    varchar(255) not null,
     match_id varchar(255) not null,
+	primary key (puuid, match_id),
     constraint summoner_matches_matches_match_id_fk
         foreign key (match_id) references teamgg.matches (match_id)
             on update cascade on delete cascade,
@@ -416,6 +423,9 @@ create table teamgg.users
     constraint user_id
         unique (user_id)
 );
+
+create index summoner_matches_match_id_index
+    on teamgg.summoner_matches (match_id);
 
 create table teamgg.user_identities
 (

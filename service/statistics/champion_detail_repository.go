@@ -1,15 +1,13 @@
 package statistics
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	uuid2 "github.com/google/uuid"
 	log "github.com/shyunku-libraries/go-logger"
-	"os"
-	"path"
 	"sort"
 	"strconv"
-	"team.gg-server/core"
+	"sync"
 	"team.gg-server/libs/db"
 	"team.gg-server/models/mixed"
 	"team.gg-server/models/mixed/statistics_models"
@@ -166,14 +164,21 @@ type ChampionDetailStatistics struct {
 }
 
 type ChampionDetailStatisticsRepository struct {
-	Cache *ChampionDetailStatistics
+	mu     sync.RWMutex
+	Cache  *ChampionDetailStatistics
+	config RunnerConfig
 }
 
-func NewChampionDetailStatisticsRepository() *ChampionDetailStatisticsRepository {
+func NewChampionDetailStatisticsRepository(config RunnerConfig) *ChampionDetailStatisticsRepository {
 	cdsr := &ChampionDetailStatisticsRepository{
-		Cache: nil,
+		Cache:  nil,
+		config: config,
 	}
-	_, _ = cdsr.Load()
+	value, err := cdsr.Load()
+	if err != nil {
+		log.Warnf("Failed to preload %s: %v", cdsr.key(), err)
+	}
+	logLoadedSnapshot(cdsr.key(), value)
 	return cdsr
 }
 
@@ -182,29 +187,38 @@ func (cdsr *ChampionDetailStatisticsRepository) key() string {
 }
 
 func (cdsr *ChampionDetailStatisticsRepository) Period() time.Duration {
-	if core.DebugMode {
-		return 1 * time.Hour
-	}
-	return 24 * time.Hour
+	return cdsr.config.Period
 }
 
-func (cdsr *ChampionDetailStatisticsRepository) Loop() {
-	for {
-		if _, err := cdsr.Collect(); err != nil {
-			log.Error(err)
-		}
-		time.Sleep(cdsr.Period())
-	}
+func (cdsr *ChampionDetailStatisticsRepository) Loop(ctx context.Context) {
+	runLoop(ctx, cdsr.key(), cdsr.config, func(ctx context.Context) error {
+		_, err := cdsr.collectCoordinated(ctx)
+		return err
+	})
 }
 
 func (cdsr *ChampionDetailStatisticsRepository) Collect() (*ChampionDetailStatistics, error) {
-	log.Debugf("collecting %s...", cdsr.key())
+	return cdsr.collectCoordinated(context.Background())
+}
+
+func (cdsr *ChampionDetailStatisticsRepository) collectCoordinated(ctx context.Context) (*ChampionDetailStatistics, error) {
+	return collectCoordinated(
+		ctx,
+		cdsr.key(),
+		cdsr.config,
+		cdsr.collect,
+		cdsr.setCache,
+	)
+}
+
+func (cdsr *ChampionDetailStatisticsRepository) collect(database db.Context) (*ChampionDetailStatistics, error) {
+	log.Infof("Collecting %s statistics...", cdsr.key())
 	timer := util.NewTimerWithName("ChampionDetailStatisticsRepository")
 	timer.Start()
 
 	// collect recent versions
 	versionCount := 3 // 4 ~ 6 weeks
-	recentMatchGameVersions, recentMatchGameShortVersions, err := mixed.GetRecentMatchGameVersions_byDescendingShortVersion_withCount(StatisticsDB, versionCount)
+	recentMatchGameVersions, recentMatchGameShortVersions, err := mixed.GetRecentMatchGameVersions_byDescendingShortVersion_withCount(database, versionCount)
 	if err != nil {
 		log.Error(err)
 		return nil, err
@@ -213,7 +227,7 @@ func (cdsr *ChampionDetailStatisticsRepository) Collect() (*ChampionDetailStatis
 
 	// collect data
 	championDetailStatisticsMXDAOmap := make(map[int]statistics_models.ChampionDetailStatisticMXDAO)
-	championDetailStatisticMXDAOs, err := statistics_models.GetChampionDetailStatisticMXDAOs(StatisticsDB, recentMatchGameVersions)
+	championDetailStatisticMXDAOs, err := statistics_models.GetChampionDetailStatisticMXDAOs(database, recentMatchGameVersions)
 	if err != nil {
 		log.Error(err)
 		return nil, err
@@ -226,7 +240,7 @@ func (cdsr *ChampionDetailStatisticsRepository) Collect() (*ChampionDetailStatis
 
 	// collect champion pick count by team position
 	championPositionStatisticsMXDAOmap := make(map[int]map[string]ChampionPositionStatistics)
-	championPositionStatisticsMXDAOs, err := statistics_models.GetChampionPositionStatisticsMXDAOs(StatisticsDB, recentMatchGameVersions)
+	championPositionStatisticsMXDAOs, err := statistics_models.GetChampionPositionStatisticsMXDAOs(database, recentMatchGameVersions)
 	if err != nil {
 		log.Error(err)
 		return nil, err
@@ -251,7 +265,7 @@ func (cdsr *ChampionDetailStatisticsRepository) Collect() (*ChampionDetailStatis
 		}
 	}
 
-	if err := statistics_models.CreateTemporaryTables(StatisticsDB, recentMatchGameVersions); err != nil {
+	if err := statistics_models.CreateTemporaryTables(database, recentMatchGameVersions); err != nil {
 		log.Error(err)
 		return nil, err
 	}
@@ -260,11 +274,11 @@ func (cdsr *ChampionDetailStatisticsRepository) Collect() (*ChampionDetailStatis
 		if err != nil {
 			log.Error(err)
 		}
-	}(StatisticsDB)
+	}(database)
 
 	// collect meta
 	championDetailStatisticsMetaMap := make(map[int][]statistics_models.ChampionDetailStatisticsMetaMXDAO)
-	championDetailStatisticsMetaMXDAOs, err := statistics_models.GetChampionDetailStatisticsMetaMXDAOs(StatisticsDB)
+	championDetailStatisticsMetaMXDAOs, err := statistics_models.GetChampionDetailStatisticsMetaMXDAOs(database)
 	if err != nil {
 		log.Error(err)
 		return nil, err
@@ -281,7 +295,7 @@ func (cdsr *ChampionDetailStatisticsRepository) Collect() (*ChampionDetailStatis
 
 	// collect counter data
 	championCounterStatisticsMap := make(map[int][]statistics_models.ChampionCounterStatisticsMXDAO) // key: championId
-	championCounterStatisticsMXDAOs, err := statistics_models.GetChampionCounterStatisticsMXDAOs(StatisticsDB)
+	championCounterStatisticsMXDAOs, err := statistics_models.GetChampionCounterStatisticsMXDAOs(database)
 	if err != nil {
 		log.Error(err)
 		return nil, err
@@ -385,18 +399,14 @@ func (cdsr *ChampionDetailStatisticsRepository) Collect() (*ChampionDetailStatis
 		stats[championId] = e
 	}
 
-	cdsr.Cache = &ChampionDetailStatistics{
+	collected := &ChampionDetailStatistics{
 		UpdatedAt: time.Now(),
 		Patches:   recentMatchGameShortVersions,
 		Data:      stats,
 	}
 
-	log.Debugf("%s data collected successfully in %s", cdsr.key(), timer.GetDurationString())
-	if err := cdsr.Save(); err != nil {
-		log.Warn(err)
-	}
-
-	return cdsr.Cache, nil
+	log.Infof("%s statistics collected successfully in %s", cdsr.key(), timer.GetDurationString())
+	return collected, nil
 }
 
 func (cdsr *ChampionDetailStatisticsRepository) collectEachChampionMetas(
@@ -870,61 +880,31 @@ func (cdsr *ChampionDetailStatisticsRepository) collectEachChampionMetas(
 }
 
 func (cdsr *ChampionDetailStatisticsRepository) Save() error {
-	if cdsr.Cache == nil {
-		log.Error("data is nil")
-		return nil
-	}
-
-	// save data
-	jsonData, err := json.Marshal(cdsr.Cache)
-	if err != nil {
-		log.Error(err)
-		return err
-	}
-
-	// create directory if not exists
-	if err = os.MkdirAll(path.Join(util.GetProjectRootDirectory(), StatisticsDataPath), 0755); err != nil {
-		log.Error(err)
-		return err
-	}
-
-	filePath := keyPath(cdsr.key())
-	err = os.WriteFile(filePath, jsonData, 0644)
-	if err != nil {
-		log.Error(err)
-		return err
-	}
-
-	log.Debugf("%s data saved to %s successfully", cdsr.key(), filePath)
-	return nil
+	return saveCurrentSnapshot(cdsr.key(), cdsr.getCache())
 }
 
 func (cdsr *ChampionDetailStatisticsRepository) Load() (*ChampionDetailStatistics, error) {
-	if cdsr.Cache != nil {
-		return cdsr.Cache, nil
+	if cached := cdsr.getCache(); cached != nil {
+		return cached, nil
 	}
-
-	// if there is no data, collect and save
-	filePath := keyPath(cdsr.key())
-	_, err := os.Stat(filePath)
+	cached, err := loadSnapshot[ChampionDetailStatistics](cdsr.key())
 	if err != nil {
-		log.Error(err)
-		return nil, nil
-	}
-
-	// read file
-	jsonData, err := os.ReadFile(filePath)
-	if err != nil {
-		log.Error(err)
 		return nil, err
 	}
-
-	// unmarshal data
-	err = json.Unmarshal(jsonData, &cdsr.Cache)
-	if err != nil {
-		log.Error(err)
-		return nil, err
+	if cached != nil {
+		cdsr.setCache(cached)
 	}
+	return cached, nil
+}
 
-	return cdsr.Cache, nil
+func (cdsr *ChampionDetailStatisticsRepository) getCache() *ChampionDetailStatistics {
+	cdsr.mu.RLock()
+	defer cdsr.mu.RUnlock()
+	return cdsr.Cache
+}
+
+func (cdsr *ChampionDetailStatisticsRepository) setCache(cache *ChampionDetailStatistics) {
+	cdsr.mu.Lock()
+	defer cdsr.mu.Unlock()
+	cdsr.Cache = cache
 }

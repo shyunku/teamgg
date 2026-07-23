@@ -1,13 +1,12 @@
 package statistics
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	log "github.com/shyunku-libraries/go-logger"
-	"os"
-	"path"
 	"strconv"
-	"team.gg-server/core"
+	"sync"
+	"team.gg-server/libs/db"
 	"team.gg-server/models/mixed/statistics_models"
 	"team.gg-server/service"
 	"team.gg-server/util"
@@ -45,14 +44,21 @@ type MasteryStatistics struct {
 }
 
 type MasteryStatisticsRepository struct {
-	Cache *MasteryStatistics
+	mu     sync.RWMutex
+	Cache  *MasteryStatistics
+	config RunnerConfig
 }
 
-func NewMasteryStatisticsRepository() *MasteryStatisticsRepository {
+func NewMasteryStatisticsRepository(config RunnerConfig) *MasteryStatisticsRepository {
 	msr := &MasteryStatisticsRepository{
-		Cache: nil,
+		Cache:  nil,
+		config: config,
 	}
-	_, _ = msr.Load()
+	value, err := msr.Load()
+	if err != nil {
+		log.Warnf("Failed to preload %s: %v", msr.key(), err)
+	}
+	logLoadedSnapshot(msr.key(), value)
 	return msr
 }
 
@@ -61,34 +67,43 @@ func (msr *MasteryStatisticsRepository) key() string {
 }
 
 func (msr *MasteryStatisticsRepository) Period() time.Duration {
-	if core.DebugMode {
-		return 1 * time.Hour
-	}
-	return 12 * time.Hour
+	return msr.config.Period
 }
 
-func (msr *MasteryStatisticsRepository) Loop() {
-	for {
-		if _, err := msr.Collect(); err != nil {
-			log.Error(err)
-		}
-		time.Sleep(msr.Period())
-	}
+func (msr *MasteryStatisticsRepository) Loop(ctx context.Context) {
+	runLoop(ctx, msr.key(), msr.config, func(ctx context.Context) error {
+		_, err := msr.collectCoordinated(ctx)
+		return err
+	})
 }
 
 func (msr *MasteryStatisticsRepository) Collect() (*MasteryStatistics, error) {
-	log.Debugf("collecting %s...", msr.key())
+	return msr.collectCoordinated(context.Background())
+}
+
+func (msr *MasteryStatisticsRepository) collectCoordinated(ctx context.Context) (*MasteryStatistics, error) {
+	return collectCoordinated(
+		ctx,
+		msr.key(),
+		msr.config,
+		msr.collect,
+		msr.setCache,
+	)
+}
+
+func (msr *MasteryStatisticsRepository) collect(database db.Context) (*MasteryStatistics, error) {
+	log.Infof("Collecting %s statistics...", msr.key())
 	timer := util.NewTimerWithName("MasteryStatisticsRepository")
 	timer.Start()
 
 	// collect data
-	masteryMXDAOs, err := statistics_models.GetMasteryStatisticsMXDAOs(StatisticsDB)
+	masteryMXDAOs, err := statistics_models.GetMasteryStatisticsMXDAOs(database)
 	if err != nil {
 		log.Error(err)
 		return nil, err
 	}
 
-	masteryTopRankersMXDAO, err := statistics_models.GetMasteryStatisticsTopRankersMXDAOs(StatisticsDB, 30)
+	masteryTopRankersMXDAO, err := statistics_models.GetMasteryStatisticsTopRankersMXDAOs(database, 30)
 	if err != nil {
 		log.Error(err)
 		return nil, err
@@ -133,78 +148,44 @@ func (msr *MasteryStatisticsRepository) Collect() (*MasteryStatistics, error) {
 		masteryMap[masteryTopRankerMXDAO.ChampionId] = mastery
 	}
 
-	msr.Cache = &MasteryStatistics{
+	collected := &MasteryStatistics{
 		UpdatedAt:     time.Now(),
 		MasteryGroups: make([]MasteryStatisticsItem, 0),
 	}
 	for _, mastery := range masteryMap {
-		msr.Cache.MasteryGroups = append(msr.Cache.MasteryGroups, mastery)
+		collected.MasteryGroups = append(collected.MasteryGroups, mastery)
 	}
 
-	log.Debugf("%s data collected successfully in %s", msr.key(), timer.GetDurationString())
-	if err := msr.Save(); err != nil {
-		log.Warn(err)
-	}
-
-	return msr.Cache, nil
+	log.Infof("%s statistics collected successfully in %s", msr.key(), timer.GetDurationString())
+	return collected, nil
 }
 
 func (msr *MasteryStatisticsRepository) Save() error {
-	if msr.Cache == nil {
-		log.Error("data is nil")
-		return nil
-	}
-
-	// save data
-	jsonData, err := json.Marshal(msr.Cache)
-	if err != nil {
-		log.Error(err)
-		return err
-	}
-
-	// create directory if not exists
-	if err = os.MkdirAll(path.Join(util.GetProjectRootDirectory(), StatisticsDataPath), 0755); err != nil {
-		log.Error(err)
-		return err
-	}
-
-	filePath := keyPath(msr.key())
-	err = os.WriteFile(filePath, jsonData, 0644)
-	if err != nil {
-		log.Error(err)
-		return err
-	}
-
-	log.Debugf("%s data saved to %s successfully", msr.key(), filePath)
-	return nil
+	return saveCurrentSnapshot(msr.key(), msr.getCache())
 }
 
 func (msr *MasteryStatisticsRepository) Load() (*MasteryStatistics, error) {
-	if msr.Cache != nil {
-		return msr.Cache, nil
+	if cached := msr.getCache(); cached != nil {
+		return cached, nil
 	}
-
-	// if there is no data, collect and save
-	filePath := keyPath(msr.key())
-	_, err := os.Stat(filePath)
+	cached, err := loadSnapshot[MasteryStatistics](msr.key())
 	if err != nil {
-		log.Error(err)
-		return nil, nil
-	}
-
-	// read file
-	jsonData, err := os.ReadFile(filePath)
-	if err != nil {
-		log.Error(err)
 		return nil, err
 	}
-
-	// unmarshal data
-	err = json.Unmarshal(jsonData, &msr.Cache)
-	if err != nil {
-		log.Error(err)
-		return nil, err
+	if cached != nil {
+		msr.setCache(cached)
 	}
+	return cached, nil
+}
 
-	return msr.Cache, nil
+func (msr *MasteryStatisticsRepository) getCache() *MasteryStatistics {
+	msr.mu.RLock()
+	defer msr.mu.RUnlock()
+	return msr.Cache
+}
+
+func (msr *MasteryStatisticsRepository) setCache(cache *MasteryStatistics) {
+	msr.mu.Lock()
+	defer msr.mu.Unlock()
+	msr.Cache = cache
 }

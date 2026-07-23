@@ -139,15 +139,3 @@ func GetMatchParticipantDAOs(db db.Context, matchId string) ([]MatchParticipantD
 	}
 	return matchParticipants, nil
 }
-
-func GetRandomMatchParticipantDAO(db db.Context) (*MatchParticipantDAO, bool, error) {
-	var matchParticipant MatchParticipantDAO
-	if err := db.Get(&matchParticipant,
-		"SELECT * FROM match_participants ORDER BY RAND() LIMIT 1"); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, false, nil
-		}
-		return nil, false, err
-	}
-	return &matchParticipant, true, nil
-}

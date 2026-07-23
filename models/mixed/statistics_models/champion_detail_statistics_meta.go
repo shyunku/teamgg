@@ -15,36 +15,86 @@ func CreateTemporaryTables(db db.Context, matchGameVersions []string) error {
 	}
 
 	commonSqls := []string{
+		`CREATE TEMPORARY TABLE IF NOT EXISTS RecentParticipants AS
+			SELECT mp.match_id,
+				   mp.match_participant_id,
+				   mp.champion_id,
+				   mp.champion_name,
+				   mp.team_position,
+				   mp.kills,
+				   mp.deaths,
+				   mp.assists,
+				   mp.team_id,
+				   mp.summoner1_id,
+				   mp.summoner2_id,
+				   mp.item0,
+				   mp.item1,
+				   mp.item2,
+				   mp.item3,
+				   mp.item4,
+				   mp.item5,
+				   mp.item6,
+				   mp.win
+			FROM matches m
+			INNER JOIN match_participants mp ON m.match_id = mp.match_id
+			WHERE m.game_version IN ('` + strings.Join(matchGameVersions, `', '`) + `')
+			  AND mp.team_position != '';`,
+		`CREATE INDEX recent_participants_participant_index
+			ON RecentParticipants (match_participant_id);`,
+		`CREATE INDEX recent_participants_match_position_index
+			ON RecentParticipants (match_id, team_position, team_id);`,
+		`CREATE TEMPORARY TABLE IF NOT EXISTS RecentPerkStyles AS
+			SELECT mpps.match_participant_id,
+				   mpps.style_id,
+				   mpps.description,
+				   mpps.style
+			FROM match_participant_perk_styles mpps
+			INNER JOIN RecentParticipants rp
+				ON mpps.match_participant_id = rp.match_participant_id;`,
+		`CREATE INDEX recent_perk_styles_style_index
+			ON RecentPerkStyles (style_id);`,
+		`CREATE INDEX recent_perk_styles_participant_index
+			ON RecentPerkStyles (match_participant_id);`,
 		`CREATE TEMPORARY TABLE IF NOT EXISTS SortedPerks AS
-			SELECT style_id, perk, ROW_NUMBER() OVER (PARTITION BY style_id ORDER BY perk DESC) AS perk_rank
-			FROM match_participant_perk_style_selections;`,
+			SELECT rps.style_id,
+				   selection.perk,
+				   ROW_NUMBER() OVER (PARTITION BY rps.style_id ORDER BY selection.perk DESC) AS perk_rank
+			FROM RecentPerkStyles rps
+			INNER JOIN match_participant_perk_style_selections selection
+				ON rps.style_id = selection.style_id;`,
+		`CREATE INDEX sorted_perks_style_index
+			ON SortedPerks (style_id, perk_rank);`,
 		`CREATE TEMPORARY TABLE IF NOT EXISTS PerkGroups AS
-			SELECT match_participant_id, mpps.style_id,
+			SELECT rps.match_participant_id, rps.style_id,
 				   MAX(CASE WHEN sp.perk_rank = 1 THEN sp.perk END) AS perk0,
 				   MAX(CASE WHEN sp.perk_rank = 2 THEN sp.perk END) AS perk1,
 				   MAX(CASE WHEN sp.perk_rank = 3 THEN sp.perk END) AS perk2,
 				   MAX(CASE WHEN sp.perk_rank = 4 THEN sp.perk END) AS perk3
-			FROM match_participant_perk_styles mpps
-			LEFT JOIN SortedPerks sp ON mpps.style_id = sp.style_id
-			GROUP BY mpps.match_participant_id, mpps.style_id;`,
+			FROM RecentPerkStyles rps
+			LEFT JOIN SortedPerks sp ON rps.style_id = sp.style_id
+			GROUP BY rps.match_participant_id, rps.style_id;`,
+		`CREATE INDEX perk_groups_participant_style_index
+			ON PerkGroups (match_participant_id, style_id);`,
 		`CREATE TEMPORARY TABLE IF NOT EXISTS PerkStyleGroups AS
-			SELECT mpps.match_participant_id,
-				   MAX(CASE WHEN description = 'primaryStyle' THEN style END) AS primary_style,
-				   MAX(CASE WHEN description = 'primaryStyle' THEN perk0 END) AS primary_perk0,
-				   MAX(CASE WHEN description = 'primaryStyle' THEN perk1 END) AS primary_perk1,
-				   MAX(CASE WHEN description = 'primaryStyle' THEN perk2 END) AS primary_perk2,
-				   MAX(CASE WHEN description = 'primaryStyle' THEN perk3 END) AS primary_perk3,
-				   MAX(CASE WHEN description = 'subStyle' THEN style END) AS sub_style,
-				   MAX(CASE WHEN description = 'subStyle' THEN perk0 END) AS sub_perk0,
-				   MAX(CASE WHEN description = 'subStyle' THEN perk1 END) AS sub_perk1,
+			SELECT rps.match_participant_id,
+				   MAX(CASE WHEN rps.description = 'primaryStyle' THEN rps.style END) AS primary_style,
+				   MAX(CASE WHEN rps.description = 'primaryStyle' THEN pg.perk0 END) AS primary_perk0,
+				   MAX(CASE WHEN rps.description = 'primaryStyle' THEN pg.perk1 END) AS primary_perk1,
+				   MAX(CASE WHEN rps.description = 'primaryStyle' THEN pg.perk2 END) AS primary_perk2,
+				   MAX(CASE WHEN rps.description = 'primaryStyle' THEN pg.perk3 END) AS primary_perk3,
+				   MAX(CASE WHEN rps.description = 'subStyle' THEN rps.style END) AS sub_style,
+				   MAX(CASE WHEN rps.description = 'subStyle' THEN pg.perk0 END) AS sub_perk0,
+				   MAX(CASE WHEN rps.description = 'subStyle' THEN pg.perk1 END) AS sub_perk1,
 				   mpp.stat_perk_defense,
 				   mpp.stat_perk_flex,
 				   mpp.stat_perk_offense
-			FROM match_participant_perk_styles mpps
-			LEFT JOIN match_participant_perks mpp ON mpps.match_participant_id = mpp.match_participant_id
-			LEFT JOIN PerkGroups pg ON mpps.match_participant_id = pg.match_participant_id
-								   AND mpps.style_id = pg.style_id
-			GROUP BY match_participant_id;`,
+			FROM RecentPerkStyles rps
+			LEFT JOIN match_participant_perks mpp ON rps.match_participant_id = mpp.match_participant_id
+			LEFT JOIN PerkGroups pg ON rps.match_participant_id = pg.match_participant_id
+								   AND rps.style_id = pg.style_id
+			GROUP BY rps.match_participant_id;`,
+		`CREATE INDEX perk_style_groups_participant_index
+			ON PerkStyleGroups (match_participant_id);`,
 		`CREATE TEMPORARY TABLE IF NOT EXISTS ItemDetails AS
 			SELECT mp.match_id, mp.match_participant_id, mp.champion_id, mp.champion_name, mp.team_position,
 				   mp.kills, mp.deaths, mp.assists, mp.team_id,
@@ -53,13 +103,11 @@ func CreateTemporaryTables(db db.Context, matchGameVersions []string) error {
 				   pc.primary_style, pc.primary_perk0, pc.primary_perk1, pc.primary_perk2, pc.primary_perk3,
 				   pc.sub_style, pc.sub_perk0, pc.sub_perk1,
 				   pc.stat_perk_defense, pc.stat_perk_flex, pc.stat_perk_offense,
-				   mt.win,
+				   mp.win,
 				   ROW_NUMBER() OVER (PARTITION BY mp.match_id, mp.match_participant_id ORDER BY si.depth DESC, si.gold_total DESC) AS item_rank
-			FROM match_participants mp
+			FROM RecentParticipants mp
 			JOIN static_items si ON si.id IN (mp.item0, mp.item1, mp.item2, mp.item3, mp.item4, mp.item5, mp.item6)
-			LEFT JOIN match_teams mt ON mp.match_id = mt.match_id AND mp.team_id = mt.team_id
 			LEFT JOIN PerkStyleGroups pc ON mp.match_participant_id = pc.match_participant_id
-			LEFT JOIN matches m ON mp.match_id = m.match_id
 			WHERE si.id IS NOT NULL
 			  AND si.id != 0
 			  AND si.required_ally IS NULL
@@ -75,8 +123,7 @@ func CreateTemporaryTables(db db.Context, matchGameVersions []string) error {
 			  AND pc.primary_perk3 IS NOT NULL
 			  AND pc.sub_style != 0
 			  AND pc.sub_perk0 IS NOT NULL
-			  AND pc.sub_perk1 IS NOT NULL
-    		  AND m.game_version IN ('` + strings.Join(matchGameVersions, `', '`) + `');`,
+			  AND pc.sub_perk1 IS NOT NULL;`,
 		`CREATE TEMPORARY TABLE IF NOT EXISTS MainGroup AS
 			SELECT match_id, match_participant_id, champion_id, champion_name, team_position,
 				   kills, deaths, assists, win, team_id,
@@ -213,8 +260,7 @@ func CreateTemporaryTables(db db.Context, matchGameVersions []string) error {
 				   emp.assists AS enemy_assists,
 				   emp.win AS enemy_win
 			FROM MainGroup mg
-			LEFT JOIN matches m ON mg.match_id = m.match_id
-			LEFT JOIN match_participants emp ON m.match_id = emp.match_id
+			LEFT JOIN RecentParticipants emp ON mg.match_id = emp.match_id
 											 AND mg.team_id != emp.team_id
 											 AND mg.team_position = emp.team_position
 			WHERE emp.team_position != ''
@@ -303,6 +349,8 @@ func CreateTemporaryTables(db db.Context, matchGameVersions []string) error {
 
 func DropTemporaryTables(db db.Context) error {
 	droppingTables := []string{
+		"RecentParticipants",
+		"RecentPerkStyles",
 		"SortedPerks",
 		"PerkGroups",
 		"PerkStyleGroups",

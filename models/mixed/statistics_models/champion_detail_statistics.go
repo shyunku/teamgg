@@ -75,14 +75,17 @@ func GetChampionDetailStatisticMXDAOs(db db.Context, versions []string) ([]Champ
 			GROUP BY mp.champion_id
 		), BanStats AS (
 			SELECT
-				champion_id,
-				COUNT(*) as total_bans
-			FROM match_team_bans
-			GROUP BY champion_id
+				mtb.champion_id,
+				COUNT(*) AS total_bans
+			FROM match_team_bans mtb
+			INNER JOIN matches m ON mtb.match_id = m.match_id
+			WHERE m.game_version IN (?)
+			GROUP BY mtb.champion_id
 		), MatchCount AS (
 			SELECT
-				COUNT(*) as matches
+				COUNT(*) AS matches
 			FROM matches
+			WHERE game_version IN (?)
 		)
 		SELECT
 			cs.*,
@@ -91,7 +94,7 @@ func GetChampionDetailStatisticMXDAOs(db db.Context, versions []string) ([]Champ
 		FROM ChampionStats cs
 		LEFT JOIN BanStats bs ON cs.champion_id = bs.champion_id
 		CROSS JOIN MatchCount mc;
-	`, versions)
+	`, versions, versions, versions)
 	if err != nil {
 		return nil, err
 	}

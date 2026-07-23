@@ -9,11 +9,46 @@ import (
 	"testing"
 )
 
+func TestConfigureGinModeFromProductionEnvironment(t *testing.T) {
+	previousMode := gin.Mode()
+	previousProductionMode := core.IsProduction
+	t.Cleanup(func() {
+		gin.SetMode(previousMode)
+		core.IsProduction = previousProductionMode
+	})
+
+	gin.SetMode(gin.DebugMode)
+	core.IsProduction = true
+	configureGinMode()
+	if gin.Mode() != gin.ReleaseMode {
+		t.Fatalf("production Gin mode: got %q, want %q", gin.Mode(), gin.ReleaseMode)
+	}
+
+	gin.SetMode(gin.ReleaseMode)
+	core.IsProduction = false
+	configureGinMode()
+	if gin.Mode() != gin.DebugMode {
+		t.Fatalf("development Gin mode: got %q, want %q", gin.Mode(), gin.DebugMode)
+	}
+
+	gin.SetMode(gin.TestMode)
+	core.IsProduction = true
+	configureGinMode()
+	if gin.Mode() != gin.TestMode {
+		t.Fatalf("explicit test Gin mode was overwritten: got %q", gin.Mode())
+	}
+}
+
 func TestServerVersion(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	previousProductionMode := core.IsProduction
 	previousDebugMode := core.DebugMode
+	core.IsProduction = true
 	core.DebugMode = true
-	t.Cleanup(func() { core.DebugMode = previousDebugMode })
+	t.Cleanup(func() {
+		core.IsProduction = previousProductionMode
+		core.DebugMode = previousDebugMode
+	})
 	recorder := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(recorder)
 	context.Request = httptest.NewRequest(http.MethodGet, "/", nil)
@@ -30,8 +65,36 @@ func TestServerVersion(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Version != core.Version || response.IsProduction {
-		t.Fatalf("body: got %+v, want version=%q isProduction=false", response, core.Version)
+	if response.Version != core.Version || !response.IsProduction {
+		t.Fatalf("body: got %+v, want version=%q isProduction=true", response, core.Version)
+	}
+}
+
+func TestProductionModeControlsTestRoutesIndependentlyFromDebug(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previousProductionMode := core.IsProduction
+	previousDebugMode := core.DebugMode
+	t.Cleanup(func() {
+		core.IsProduction = previousProductionMode
+		core.DebugMode = previousDebugMode
+	})
+
+	core.IsProduction = true
+	core.DebugMode = true
+	productionRecorder := httptest.NewRecorder()
+	productionRequest := httptest.NewRequest(http.MethodGet, "/test/riotApiCalls", nil)
+	SetupRouter().ServeHTTP(productionRecorder, productionRequest)
+	if productionRecorder.Code != http.StatusNotFound {
+		t.Fatalf("production test route status: got %d, want %d", productionRecorder.Code, http.StatusNotFound)
+	}
+
+	core.IsProduction = false
+	core.DebugMode = false
+	developmentRecorder := httptest.NewRecorder()
+	developmentRequest := httptest.NewRequest(http.MethodGet, "/test/riotApiCalls", nil)
+	SetupRouter().ServeHTTP(developmentRecorder, developmentRequest)
+	if developmentRecorder.Code != http.StatusOK {
+		t.Fatalf("development test route status: got %d, want %d", developmentRecorder.Code, http.StatusOK)
 	}
 }
 
