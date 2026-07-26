@@ -14,6 +14,12 @@
   let refinedData = [];
   let dataPatches = [];
   let lastUpdateTime = null;
+  let rateMaxima = {
+    winRate: 0,
+    avgPickRate: 0,
+    avgBanRate: 0,
+  };
+  let searchQuery = "";
 
   let reverseSort = false;
   let sortBy = null;
@@ -66,8 +72,15 @@
     push(`/statistics/champion/${championId}`);
   };
 
+  const relativeBarWidth = (value, maximum) => {
+    if (!Number.isFinite(value) || !Number.isFinite(maximum) || maximum <= 0) return 0;
+    return Math.min(100, Math.max(0, (value / maximum) * 100));
+  };
+
   $: if (rawData) {
+    const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
     refinedData = rawData
+      .filter((c) => !normalizedQuery || (c?.championName ?? "").toLocaleLowerCase().includes(normalizedQuery))
       .map((c) => {
         let extra = c?.extraStats ?? {};
         return {
@@ -96,14 +109,33 @@
       });
   }
 
+  $: rateMaxima = {
+    winRate: Math.max(0, ...refinedData.map((c) => c.winRate ?? 0)),
+    avgPickRate: Math.max(0, ...refinedData.map((c) => c.avgPickRate ?? 0)),
+    avgBanRate: Math.max(0, ...refinedData.map((c) => c.avgBanRate ?? 0)),
+  };
+
   getChampionStatistics();
 </script>
 
 <div class="statistics-champion">
   <div class="content card">
-    <div class="title">챔피언 통계 ({dataPatches.join(", ")} 패치)</div>
-    <div class="description">해당 지표들은 team.gg에서 검색 또는 추적되는 데이터들로 구성되었습니다.</div>
-    <div class="updated-at">{moment(lastUpdateTime).format("YYYY년 M월 D일 a h시 mm분에 업데이트됨")}</div>
+    <div class="statistics-heading-row">
+      <div class="statistics-heading">
+        <div class="title">챔피언 통계 ({dataPatches.join(", ")} 패치)</div>
+        <div class="description">해당 지표들은 team.gg에서 검색 또는 추적되는 데이터들로 구성되었습니다.</div>
+        <div class="updated-at">{moment(lastUpdateTime).format("YYYY년 M월 D일 a h시 mm분에 업데이트됨")}</div>
+      </div>
+      <div class="statistics-filters">
+        <input
+          class="champion-search"
+          type="search"
+          bind:value={searchQuery}
+          placeholder="챔피언 이름 검색"
+          aria-label="챔피언 이름 검색"
+        />
+      </div>
+    </div>
     <div class="champion-list">
       <div class="champion-item header">
         {#each sortOptions as option}
@@ -128,19 +160,19 @@
           <div class="champion-winrate">
             <div class="label">{(c.winRate * 100).toFixed(2)}%</div>
             <div class="bar-wrapper">
-              <div class="bar" style={`width: ${c.winRate * 100}%`}></div>
+              <div class="bar" style={`width: ${relativeBarWidth(c.winRate, rateMaxima.winRate)}%`}></div>
             </div>
           </div>
           <div class="champion-pickrate">
             <div class="label">{(c.avgPickRate * 100).toFixed(2)}%</div>
             <div class="bar-wrapper">
-              <div class="bar" style={`width: ${c.avgPickRate * 100}%`}></div>
+              <div class="bar" style={`width: ${relativeBarWidth(c.avgPickRate, rateMaxima.avgPickRate)}%`}></div>
             </div>
           </div>
           <div class="champion-banrate">
             <div class="label">{(c.avgBanRate * 100).toFixed(2)}%</div>
             <div class="bar-wrapper">
-              <div class="bar" style={`width: ${c.avgBanRate * 100}%`}></div>
+              <div class="bar" style={`width: ${relativeBarWidth(c.avgBanRate, rateMaxima.avgBanRate)}%`}></div>
             </div>
           </div>
           <div class="champion-kda">
@@ -152,6 +184,9 @@
           <div class="champion-gold-earned">{(extra?.avgGoldEarned ?? 0).toFixed(0)} 골드</div>
         </div>
       {/each}
+      {#if rawData && refinedData.length === 0}
+        <div class="empty-state">검색 결과가 없습니다.</div>
+      {/if}
     </div>
   </div>
 </div>

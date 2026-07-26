@@ -3,11 +3,12 @@
   import PageHeaderLayout from "../../../layouts/PageHeaderLayout.svelte";
   import { championIconUrl } from "../../../thunks/GeneralThunk";
 
-  const pickRateCap = 0.5;
-  const winRateCap = 1;
-  const banRateCap = 0.5;
-
   export let data;
+  export let rateMaxima = {
+    pickRate: 0,
+    winRate: 0,
+    banRate: 0,
+  };
 
   let pickRate = 0;
   let winRate = 0;
@@ -17,6 +18,11 @@
     winRate = data?.avgWinRate ?? 0;
     banRate = data?.avgBanRate ?? 0;
   }
+
+  const relativeBarWidth = (value, maximum) => {
+    if (!Number.isFinite(value) || !Number.isFinite(maximum) || maximum <= 0) return 0;
+    return Math.min(100, Math.max(0, (value / maximum) * 100));
+  };
 </script>
 
 <PageHeaderLayout class="champion-detail-summary">
@@ -39,7 +45,7 @@
           <div class="value">{(pickRate * 100).toFixed(2)}%</div>
           <div class="fat"></div>
           <div class="bar">
-            <div class="filler" style="width: {(pickRate * 100) / pickRateCap}%" />
+            <div class="filler" style="width: {relativeBarWidth(pickRate, rateMaxima.pickRate)}%" />
           </div>
         </div>
         <div class="rate win-rate">
@@ -47,7 +53,7 @@
           <div class="value">{(winRate * 100).toFixed(2)}%</div>
           <div class="fat"></div>
           <div class="bar">
-            <div class="filler" style="width: {(winRate * 100) / winRateCap}%" />
+            <div class="filler" style="width: {relativeBarWidth(winRate, rateMaxima.winRate)}%" />
           </div>
         </div>
         <div class="rate ban-rate">
@@ -55,7 +61,7 @@
           <div class="value">{(banRate * 100).toFixed(2)}%</div>
           <div class="fat"></div>
           <div class="bar">
-            <div class="filler" style="width: {(banRate * 100) / banRateCap}%" />
+            <div class="filler" style="width: {relativeBarWidth(banRate, rateMaxima.banRate)}%" />
           </div>
         </div>
       </div>

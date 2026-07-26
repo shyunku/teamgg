@@ -1,12 +1,107 @@
 .statistics-champion {
   width: 100%;
 
+  .statistics-heading-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
+    width: 100%;
+    min-width: 1040px;
+
+    .statistics-heading {
+      min-width: 0;
+    }
+
+    .statistics-filters {
+      display: flex;
+      flex: 0 0 auto;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
+    }
+
+    .line-switches {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+
+      .line-switch {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 31px;
+        height: 29px;
+        padding: 0;
+        border: 1px solid var(--color-border);
+        border-radius: 4px;
+        outline: none;
+        background-color: var(--color-bg-elevated);
+        cursor: pointer;
+        transition:
+          border-color 120ms ease,
+          background-color 120ms ease,
+          box-shadow 120ms ease;
+
+        &:hover {
+          border-color: var(--color-border-strong);
+          background-color: var(--color-surface-hover);
+        }
+
+        &.selected {
+          border-color: var(--color-highlight);
+          background-color: rgba(79, 140, 255, 0.14);
+          box-shadow: 0 0 8px rgba(79, 140, 255, 0.2);
+        }
+      }
+    }
+
+    .champion-search {
+      width: 210px;
+      height: 32px;
+      padding: 0 10px;
+      box-sizing: border-box;
+      border: 1px solid var(--color-border);
+      border-radius: 4px;
+      outline: none;
+      background-color: var(--color-bg-elevated);
+      color: var(--color-text-primary);
+      font-size: 12px;
+
+      &::placeholder {
+        color: var(--color-text-muted);
+      }
+
+      &:hover {
+        border-color: var(--color-border-strong);
+      }
+
+      &:focus {
+        border-color: var(--color-highlight);
+        box-shadow: 0 0 0 2px rgba(79, 140, 255, 0.12);
+      }
+
+      &::-webkit-search-cancel-button {
+        cursor: pointer;
+      }
+    }
+  }
+
   .champion-list {
     display: flex;
     flex-direction: column;
     width: 100%;
     margin-top: 15px;
     min-width: 1040px;
+
+    .empty-state {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100px;
+      color: var(--color-text-muted);
+      font-size: 13px;
+    }
 
     .champion-item {
       display: flex;

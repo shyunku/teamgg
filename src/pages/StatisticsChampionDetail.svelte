@@ -2,7 +2,7 @@
   import ChampionDetailContent from "../organisms/player/champion-statistics-detail/ChampionDetailContent.svelte";
   import ChampionDetailHeader from "../organisms/player/champion-statistics-detail/ChampionDetailHeader.svelte";
   import ChampionDetailMenu from "../organisms/player/champion-statistics-detail/ChampionDetailMenu.svelte";
-  import { championIconUrl, getChampionDetailStatisticsReq } from "../thunks/GeneralThunk";
+  import { getChampionDetailStatisticsReq, getChampionStatisticsReq } from "../thunks/GeneralThunk";
   import "./StatisticsChampionDetail.scss";
 
   export const ChampionDetailOptions = {
@@ -13,6 +13,11 @@
   export let params = {};
 
   let data = null;
+  let rateMaxima = {
+    pickRate: 0,
+    winRate: 0,
+    banRate: 0,
+  };
   let menuKey = ChampionDetailOptions.META.key;
 
   $: {
@@ -24,15 +29,27 @@
 
   let loadChampionDetail = async (championId) => {
     try {
-      let resp = await getChampionDetailStatisticsReq(championId);
-      console.log(resp);
-      data = resp;
+      const [detailResponse, statisticsResponse] = await Promise.all([
+        getChampionDetailStatisticsReq(championId),
+        getChampionStatisticsReq(),
+      ]);
+      const champions = Object.values(statisticsResponse?.data ?? {});
+      rateMaxima = {
+        pickRate: Math.max(0, ...champions.map((champion) => champion?.avgPickRate ?? 0)),
+        winRate: Math.max(
+          0,
+          ...champions.map((champion) => champion?.avgWinRate ?? (champion?.win ?? 0) / (champion?.total || 1))
+        ),
+        banRate: Math.max(0, ...champions.map((champion) => champion?.avgBanRate ?? 0)),
+      };
+      console.log(detailResponse);
+      data = detailResponse;
     } catch (e) {
       console.error(e);
     }
   };
 </script>
 
-<ChampionDetailHeader {data} />
+<ChampionDetailHeader {data} {rateMaxima} />
 <ChampionDetailMenu menus={ChampionDetailOptions} bind:menuKey />
 <ChampionDetailContent {menuKey} {data} />
