@@ -76,9 +76,9 @@ func (tsr *TierStatisticsRepository) Period() time.Duration {
 }
 
 func (tsr *TierStatisticsRepository) Loop(ctx context.Context) {
-	runLoop(ctx, tsr.key(), tsr.config, func(ctx context.Context) error {
-		_, err := tsr.collectCoordinated(ctx)
-		return err
+	runLoop(ctx, tsr.key(), tsr.config, func(ctx context.Context) (time.Duration, error) {
+		_, nextDelay, err := tsr.collectCoordinatedScheduled(ctx)
+		return nextDelay, err
 	})
 }
 
@@ -87,6 +87,11 @@ func (tsr *TierStatisticsRepository) Collect() (*TierStatistics, error) {
 }
 
 func (tsr *TierStatisticsRepository) collectCoordinated(ctx context.Context) (*TierStatistics, error) {
+	value, _, err := tsr.collectCoordinatedScheduled(ctx)
+	return value, err
+}
+
+func (tsr *TierStatisticsRepository) collectCoordinatedScheduled(ctx context.Context) (*TierStatistics, time.Duration, error) {
 	return collectCoordinated(
 		ctx,
 		tsr.key(),

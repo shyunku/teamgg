@@ -71,9 +71,9 @@ func (msr *MasteryStatisticsRepository) Period() time.Duration {
 }
 
 func (msr *MasteryStatisticsRepository) Loop(ctx context.Context) {
-	runLoop(ctx, msr.key(), msr.config, func(ctx context.Context) error {
-		_, err := msr.collectCoordinated(ctx)
-		return err
+	runLoop(ctx, msr.key(), msr.config, func(ctx context.Context) (time.Duration, error) {
+		_, nextDelay, err := msr.collectCoordinatedScheduled(ctx)
+		return nextDelay, err
 	})
 }
 
@@ -82,6 +82,11 @@ func (msr *MasteryStatisticsRepository) Collect() (*MasteryStatistics, error) {
 }
 
 func (msr *MasteryStatisticsRepository) collectCoordinated(ctx context.Context) (*MasteryStatistics, error) {
+	value, _, err := msr.collectCoordinatedScheduled(ctx)
+	return value, err
+}
+
+func (msr *MasteryStatisticsRepository) collectCoordinatedScheduled(ctx context.Context) (*MasteryStatistics, time.Duration, error) {
 	return collectCoordinated(
 		ctx,
 		msr.key(),

@@ -182,7 +182,7 @@ func runLoop(
 	ctx context.Context,
 	key string,
 	config RunnerConfig,
-	collect func(context.Context) error,
+	collect func(context.Context) (time.Duration, error),
 ) {
 	if !config.Enabled {
 		log.Infof("Statistics %s loop is disabled", key)
@@ -203,7 +203,8 @@ func runLoop(
 	}
 	for {
 		delay := config.Period
-		if err := collect(ctx); err != nil {
+		scheduledDelay, err := collect(ctx)
+		if err != nil {
 			if errors.Is(err, ErrStatisticsCollectionLocked) {
 				delay = config.LockRetryDelay
 				log.Infof("Statistics %s is being collected by another instance; retrying in %s", key, delay)
@@ -211,6 +212,8 @@ func runLoop(
 				delay = config.RetryDelay
 				log.Errorf("Statistics %s collection failed; retrying in %s: %v", key, delay, err)
 			}
+		} else if scheduledDelay > 0 {
+			delay = scheduledDelay
 		}
 		if !waitContext(ctx, delay) {
 			return
@@ -238,13 +241,13 @@ func collectCoordinated[T any](
 	config RunnerConfig,
 	collector func(db.Context) (*T, error),
 	setCache func(*T),
-) (*T, error) {
+) (*T, time.Duration, error) {
 	if StatisticsDB == nil {
-		return nil, errors.New("statistics database is not initialized")
+		return nil, 0, errors.New("statistics database is not initialized")
 	}
 	conn, err := StatisticsDB.Connx(ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer conn.Close()
 	database := cancelableDatabase{ctx: ctx, conn: conn}
@@ -254,7 +257,7 @@ func collectCoordinated[T any](
 	// READ COMMITTED makes these analytical reads non-locking while the
 	// dedicated statistics connection still keeps all temporary tables scoped.
 	if _, err := database.Exec("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED"); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	// One global lock serializes all heavy statistics scans across every server
@@ -264,10 +267,10 @@ func collectCoordinated[T any](
 	lockSeconds := int(math.Ceil(config.LockTimeout.Seconds()))
 	var acquired sql.NullInt64
 	if err := conn.GetContext(ctx, &acquired, "SELECT GET_LOCK(?, ?)", lockName, lockSeconds); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if !acquired.Valid || acquired.Int64 != 1 {
-		return nil, ErrStatisticsCollectionLocked
+		return nil, 0, ErrStatisticsCollectionLocked
 	}
 	defer func() {
 		var released sql.NullInt64
@@ -279,20 +282,25 @@ func collectCoordinated[T any](
 	// instance from recomputing the same snapshot after the first one finishes.
 	snapshot, err := models.GetStatisticsSnapshot(database, key, config.Period)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if snapshot != nil && snapshot.Fresh {
 		var cached T
 		payload, err := decodeSharedPayload(snapshot.Payload)
 		if err != nil {
-			return nil, fmt.Errorf("decompress shared %s snapshot: %w", key, err)
+			return nil, 0, fmt.Errorf("decompress shared %s snapshot: %w", key, err)
 		}
 		if err := json.Unmarshal(payload, &cached); err != nil {
-			return nil, fmt.Errorf("decode shared %s snapshot: %w", key, err)
+			return nil, 0, fmt.Errorf("decode shared %s snapshot: %w", key, err)
 		}
 		setCache(&cached)
-		log.Debugf("Statistics %s shared snapshot is still fresh; collection skipped", key)
-		return &cached, nil
+		nextDelay := snapshot.RemainingFreshness()
+		log.Debugf(
+			"Statistics %s shared snapshot is still fresh; collection skipped, retrying at expiry in %s",
+			key,
+			nextDelay,
+		)
+		return &cached, nextDelay, nil
 	}
 
 	// Keep the complete collection on this connection so MySQL temporary
@@ -301,18 +309,18 @@ func collectCoordinated[T any](
 	// while DataExplorer keeps writing.
 	collected, err := collector(database)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	payload, err := json.Marshal(collected)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	sharedPayload, err := encodeSharedPayload(payload)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if err := models.UpsertStatisticsSnapshot(database, key, sharedPayload); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	log.Infof(
 		"Statistics %s shared snapshot saved (json=%d bytes, gzip=%d bytes)",
@@ -326,7 +334,7 @@ func collectCoordinated[T any](
 		log.Warnf("Failed to write local %s statistics backup: %v", key, err)
 	}
 	setCache(collected)
-	return collected, nil
+	return collected, config.Period, nil
 }
 
 func loadSnapshot[T any](key string) (*T, error) {

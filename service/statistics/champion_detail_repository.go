@@ -191,9 +191,9 @@ func (cdsr *ChampionDetailStatisticsRepository) Period() time.Duration {
 }
 
 func (cdsr *ChampionDetailStatisticsRepository) Loop(ctx context.Context) {
-	runLoop(ctx, cdsr.key(), cdsr.config, func(ctx context.Context) error {
-		_, err := cdsr.collectCoordinated(ctx)
-		return err
+	runLoop(ctx, cdsr.key(), cdsr.config, func(ctx context.Context) (time.Duration, error) {
+		_, nextDelay, err := cdsr.collectCoordinatedScheduled(ctx)
+		return nextDelay, err
 	})
 }
 
@@ -202,6 +202,11 @@ func (cdsr *ChampionDetailStatisticsRepository) Collect() (*ChampionDetailStatis
 }
 
 func (cdsr *ChampionDetailStatisticsRepository) collectCoordinated(ctx context.Context) (*ChampionDetailStatistics, error) {
+	value, _, err := cdsr.collectCoordinatedScheduled(ctx)
+	return value, err
+}
+
+func (cdsr *ChampionDetailStatisticsRepository) collectCoordinatedScheduled(ctx context.Context) (*ChampionDetailStatistics, time.Duration, error) {
 	return collectCoordinated(
 		ctx,
 		cdsr.key(),
