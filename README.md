@@ -1,72 +1,72 @@
-# 🎮 team.gg Server
+# team.gg Backend
 
-League of Legends 내전(커스텀 게임) 매칭, 참가자 밸런스 조정 및 전적/통계 분석 서비스를 제공하는 **team.gg**의 백엔드 API 서버입니다. Go 언어와 Gin 프레임워크를 기반으로 구축되었으며, 실시간 통신 및 백그라운드 데이터 수집 루프를 포함하고 있습니다.
+The backend API server for **team.gg**, a League of Legends service for custom-game team building, participant balancing, match history, and statistics analysis. It is built with Go and Gin and includes real-time communication and background data collection jobs.
 
 ---
 
-## 🛠️ 기술 스택 (Tech Stack)
+## Tech Stack
 
 - **Language**: Go 1.26.5
 - **Web Framework**: [Gin Web Framework](https://github.com/gin-gonic/gin)
 - **Realtime**: [go-socket.io](https://github.com/googollee/go-socket.io)
-- **Database**: MySQL / PostgreSQL (with [sqlx](https://github.com/jmoiron/sqlx))
-- **Cache / In-Memory DB**: Redis ([go-redis/v9](https://github.com/redis/go-redis))
-- **Third-Party API**: Riot Games API & Riot Sign On (RSO)
+- **Database**: MySQL / PostgreSQL with [sqlx](https://github.com/jmoiron/sqlx)
+- **Cache / In-Memory Database**: Redis with [go-redis/v9](https://github.com/redis/go-redis)
+- **Third-Party APIs**: Riot Games API and Riot Sign On (RSO)
 
 ---
 
-## 📁 디렉토리 구조 (Directory Structure)
+## Project Structure
 
 ```text
-team.gg-server/
-├── controllers/          # API 핸들러 및 라우터 정의
-│   ├── middlewares/      # Gin 미들웨어 (인증, 로깅 등)
-│   ├── socket/           # 웹소켓(socket.io) 통신 핸들러
-│   └── v1/               # 버전 1 API 라우터 (인증, 내전 관리, 통계 등)
-├── models/               # 데이터베이스 모델 및 DTO 정의 (소환사, 매치, 참가자 등)
-├── service/              # 핵심 비즈니스 로직 및 백그라운드 스케줄러
-│   ├── statistics/       # 챔피언, 티어, 숙련도 통계 주기적 집계 로직
-│   └── explorer.go       # 백그라운드 데이터 수집 및 Riot API 주기적 연동
-├── libs/                 # 공통 라이브러리 (DB 커넥션, 암호화 패키지)
-├── third_party/          # 외부 라이브러리 및 Riot API 클라이언트
-├── scripts/              # 빌드, 데몬 실행, 정지 등 셸 스크립트
-├── go.mod / go.sum       # 의존성 관리 파일
-└── main.go               # 서버 시작점 (Initialization & Runner)
+teamgg-backend/
+├── controllers/          # API handlers and route definitions
+│   ├── middlewares/      # Gin middleware, including authentication and logging
+│   ├── socket/           # Socket.IO handlers
+│   └── v1/               # Version 1 API routes for auth, custom games, statistics, and more
+├── models/               # Database models and DTOs for summoners, matches, participants, and more
+├── service/              # Core business logic and background schedulers
+│   └── statistics/       # Periodic champion, tier, and mastery aggregation
+├── libs/                 # Shared packages for database access, cryptography, and HTTP clients
+├── third_party/          # Third-party clients, including the Riot API client
+├── migrations/           # Database migration scripts
+├── scripts/              # Build, daemon, stop, and restart scripts
+├── go.mod / go.sum       # Go module and dependency definitions
+└── main.go               # Application entry point
 ```
 
 ---
 
-## ⚙️ 환경 설정 (Configuration)
+## Configuration
 
-프로젝트 루트 디렉토리에 `.env` 파일을 생성하고 아래의 환경 변수들을 설정해야 합니다.
+Create a `.env` file in the project root and configure the following environment variables.
 
 ```env
-# Server Port
+# Server port
 APP_SERVER_PORT=8080
 
-# Database Configuration (MySQL / PostgreSQL)
+# Database configuration
 DB_USER=your_db_user
 DB_PASSWORD=your_db_password
 DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_NAME=team_gg
 
-# JWT Secret Keys
+# JWT secrets and expiration times
 JWT_ACCESS_SECRET=your_jwt_access_secret
 JWT_ACCESS_EXPIRE=3600
 JWT_REFRESH_SECRET=your_jwt_refresh_secret
 JWT_REFRESH_EXPIRE=604800
 
-# Riot Sign On (RSO) & Riot API Client
+# Riot Sign On (RSO) and Riot API client
 RSO_CLIENT_ID=your_rso_client_id
 RSO_CLIENT_SECRET=your_rso_client_secret
 RSO_CLIENT_CALLBACK_URI=http://localhost:8080/v1/auth/callback
 
-# Debug Mode (true/false)
+# Runtime environment and diagnostics
 DEBUG=true
 IS_PROD=false
 
-# Background data explorer (optional)
+# Background DataExplorer jobs (optional)
 DATA_EXPLORER_ENABLED=true
 DATA_EXPLORER_SUMMONER_WORKERS=1
 DATA_EXPLORER_MATCH_WORKERS=2
@@ -99,39 +99,46 @@ STATISTICS_LOCK_RETRY_DELAY=15s
 STATISTICS_LOCK_TIMEOUT=1s
 ```
 
-`DATA_EXPLORER_*_BUDGET`에 `0`을 지정하면 해당 일일 제한을 사용하지 않습니다. 워커 수와 예산은 Riot API 제품 키의 실제 제한에 맞춰 조정해야 합니다.
+Set a `DATA_EXPLORER_*_BUDGET` variable to `0` to disable that daily budget. Worker counts and budgets should be configured according to the rate limits of your Riot API product key.
 
-통계 시간 값은 Go duration 형식(`30s`, `5m`, `12h`)을 사용합니다. 각 통계는 서로 다른 초기 지연으로 시작해 서버 부팅 시 DB 집계가 한꺼번에 실행되지 않습니다. `STATISTICS_LOCK_RETRY_DELAY`는 다른 통계가 실행 중일 때의 짧은 재시도 간격이고, `STATISTICS_RETRY_DELAY`는 실제 집계 오류가 발생했을 때의 재시도 간격입니다. 여러 서버 인스턴스가 실행되어도 MySQL advisory lock과 `statistics_snapshots` 공용 캐시를 이용해 동일 통계를 중복 계산하지 않습니다.
+Statistics timing values use Go duration syntax, such as `30s`, `5m`, and `12h`. Each statistics job uses a different initial delay so that database aggregation jobs do not all start at once during server startup. `STATISTICS_LOCK_RETRY_DELAY` controls the short retry interval used when another statistics job holds the lock, while `STATISTICS_RETRY_DELAY` controls retries after an actual collection error. When multiple server instances are running, MySQL advisory locks and the shared `statistics_snapshots` cache prevent duplicate aggregation work.
 
 ---
 
-## 🚀 실행 및 빌드 방법 (How to Run)
+## Running and Building
 
-### 1. 사전 요구사항 (Prerequisites)
-- [Go](https://go.dev/doc/install) 1.26.5 설치
-- MySQL 또는 PostgreSQL 데이터베이스 인스턴스 실행
-- Redis 서버 실행
+### 1. Prerequisites
 
-### 2. 의존성 패키지 설치
+- [Go](https://go.dev/doc/install) 1.26.5
+- A running MySQL or PostgreSQL database instance
+- A running Redis server
+
+### 2. Install Dependencies
+
 ```bash
 go mod download
 ```
 
-### 3. 데이터베이스 스키마 적용
-프로젝트 루트의 `scheme.ddl` 스키마 파일을 관계형 데이터베이스에 적용합니다.
+### 3. Apply the Database Schema
 
-기존 설치에서 DataExplorer 큐로 전환할 때는 서버 쓰기를 중단한 뒤 `migrations/20260720_add_data_explorer_queue.sql`을 적용합니다. 이 마이그레이션은 키가 없던 `summoner_matches`를 7일 단위로 중복 제거하여 교체하며, 검증을 위해 기존 테이블을 `summoner_matches_legacy_20260720` 이름으로 남깁니다.
+Apply the `scheme.ddl` schema file from the project root to your relational database.
 
-통계 공용 캐시 테이블은 서버 시작 시 자동 생성됩니다. 대규모 기존 DB에서는 통계 조회용 인덱스를 추가하는 `migrations/20260724_add_statistics_indexes.sql`을 트래픽이 적은 유지보수 시간에 한 번 적용하는 것을 권장합니다.
+When migrating an existing installation to the DataExplorer queue, stop server writes before applying `migrations/20260720_add_data_explorer_queue.sql`. This migration deduplicates and replaces the previously unkeyed `summoner_matches` data in seven-day batches. It retains the previous table as `summoner_matches_legacy_20260720` for verification.
 
-### 4. 개발 서버 실행
+The shared statistics snapshot table is created automatically when the server starts. For a large existing database, apply `migrations/20260724_add_statistics_indexes.sql` once during a low-traffic maintenance window to add the recommended statistics query indexes.
+
+### 4. Run the Development Server
+
 ```bash
 go run main.go
 ```
 
-### 5. 빌드 및 배포 스크립트 (Linux environment)
-`scripts/` 디렉토리에 유틸리티 스크립트가 포함되어 있습니다.
-- **빌드**: `bash scripts/build.sh`
-- **백그라운드 실행(데몬)**: `bash scripts/daemon.sh`
-- **서버 정지**: `bash scripts/stop.sh`
-- **재빌드 및 재시작**: `bash scripts/build_and_restart.sh`
+### 5. Build and Deployment Scripts
+
+The `scripts/` directory contains operational utilities.
+
+- **Build**: `bash scripts/build.sh`
+- **Run in the background**: `bash scripts/daemon.sh`
+- **Stop the server**: `bash scripts/stop.sh`
+- **Rebuild and restart**: `bash scripts/build_and_restart.sh`
+- **Build and run on Windows**: `scripts\\build_and_restart.bat`
