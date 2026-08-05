@@ -12,6 +12,7 @@
   import JsxUtil from "../utils/JsxUtil";
   import FaUserCircle from "svelte-icons/fa/FaUserCircle.svelte";
   import FaChevronDown from "svelte-icons/fa/FaChevronDown.svelte";
+  import Skeleton from "../molecules/Skeleton.svelte";
 
   const HeaderMenus = {
     main: { key: "", label: "전적" },
@@ -28,6 +29,8 @@
   let riotProfileIconId = null;
   let isLolAccount = false;
   let accountMenuOpen = false;
+  let accountLoading = false;
+  let accountRequestId = 0;
   let unsubscribeAuth;
 
   // console.log(authStore.);
@@ -73,6 +76,8 @@
   };
 
   const checkIsAuthorized = async () => {
+    const requestId = ++accountRequestId;
+    accountLoading = true;
     try {
       const account = await getMyAccount();
       userId = account?.displayName ?? account?.riot?.displayName ?? account?.userId ?? userId;
@@ -95,6 +100,8 @@
       }
 
       toasts.add({ title: "인증 정보", description: "인증 정보를 확인하던 중 오류가 발생했습니다.", type: "error" });
+    } finally {
+      if (requestId === accountRequestId) accountLoading = false;
     }
   };
 
@@ -110,6 +117,8 @@
       if (isAuthorized) {
         checkIsAuthorized();
       } else {
+        accountRequestId++;
+        accountLoading = false;
         riotProfileIconId = null;
         isLolAccount = false;
       }
@@ -173,7 +182,11 @@
               <FaUserCircle />
             {/if}
           </span>
-          <span class="account-name" class:riot-account-name={isLolAccount}>{userId}</span>
+          {#if accountLoading}
+            <Skeleton width="105px" height="15px" />
+          {:else}
+            <span class="account-name" class:riot-account-name={isLolAccount}>{userId}</span>
+          {/if}
           <span class="account-chevron"><FaChevronDown /></span>
         </button>
         {#if accountMenuOpen}

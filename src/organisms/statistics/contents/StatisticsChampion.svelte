@@ -8,6 +8,8 @@
   import "moment/locale/ko";
   import { toasts } from "svelte-toasts";
   import { compareVersions } from "compare-versions";
+  import Skeleton from "../../../molecules/Skeleton.svelte";
+  import SkeletonRows from "../../../molecules/SkeletonRows.svelte";
   moment.locale("ko");
 
   let rawData = null;
@@ -56,10 +58,10 @@
       const { updatedAt, data, patches } = resp;
       lastUpdateTime = updatedAt;
       rawData = Object.values(data).sort((a, b) => a.championName.localeCompare(b.championName));
-      dataPatches = patches.sort((a, b) => compareVersions(b, a, ">="));
-      console.log(data);
+      dataPatches = [...patches].sort((a, b) => compareVersions(b, a, ">="));
     } catch (e) {
       console.error(e);
+      rawData = [];
       toasts.add({
         title: "챔피언 통계",
         description: "통계를 불러오는 중 오류가 발생했습니다.",
@@ -124,13 +126,16 @@
       <div class="statistics-heading">
         <div class="title">챔피언 통계 ({dataPatches.join(", ")} 패치)</div>
         <div class="description">해당 지표들은 team.gg에서 검색 또는 추적되는 데이터들로 구성되었습니다.</div>
-        <div class="updated-at">{moment(lastUpdateTime).format("YYYY년 M월 D일 a h시 mm분에 업데이트됨")}</div>
+        <div class="updated-at">
+          {#if rawData == null}<Skeleton width="230px" height="12px" />{:else}{moment(lastUpdateTime).format("YYYY년 M월 D일 a h시 mm분에 업데이트됨")}{/if}
+        </div>
       </div>
       <div class="statistics-filters">
         <input
           class="champion-search"
           type="search"
           bind:value={searchQuery}
+          disabled={rawData == null}
           placeholder="챔피언 이름 검색"
           aria-label="챔피언 이름 검색"
         />
@@ -147,11 +152,14 @@
           </div>
         {/each}
       </div>
+      {#if rawData == null}
+        <div class="statistics-loading"><SkeletonRows rows={8} height="44px" gap="1px" /></div>
+      {:else}
       {#each refinedData as c}
         {@const extra = c?.extraStats ?? {}}
         <div class="champion-item">
           <div class="champion-img img">
-            <SafeImg src={championIconUrl(c?.championId)} />
+            <SafeImg src={championIconUrl(c?.championId)} loading="lazy" decoding="async" />
           </div>
           <div class="champion-name" on:click={(e) => moveToChampionDetail(c?.championId)}>
             {c?.championName ?? "-"}
@@ -186,6 +194,7 @@
       {/each}
       {#if rawData && refinedData.length === 0}
         <div class="empty-state">검색 결과가 없습니다.</div>
+      {/if}
       {/if}
     </div>
   </div>

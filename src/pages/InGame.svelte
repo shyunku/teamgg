@@ -11,6 +11,7 @@
   import { sanitizeString } from "../utils/Util";
   import InGameChampionSelect from "../organisms/in-game/details/InGameChampionSelect.svelte";
   import InGameLobby from "../organisms/in-game/details/InGameLobby.svelte";
+  import Skeleton from "../molecules/Skeleton.svelte";
 
   const ClientStatus = {
     0: "CONNECTING",
@@ -147,6 +148,11 @@
             <div class="game-name">{currentSummoner.gameName}</div>
             <div class="tag-line">#{currentSummoner.tagLine}</div>
           </div>
+        </div>
+      {:else if currentIngameStatus === InGameStatus.ONLINE}
+        <div class="profile-section" aria-label="소환사 정보 불러오는 중" aria-busy="true">
+          <Skeleton width="40px" height="40px" radius="50%" />
+          <Skeleton width="130px" height="16px" />
         </div>
       {/if}
     </div>

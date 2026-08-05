@@ -2,6 +2,7 @@
   import { onDestroy, onMount } from "svelte";
   import { toasts } from "svelte-toasts";
   import MainContentLayout from "../layouts/MainContentLayout.svelte";
+  import PageSkeleton from "../molecules/PageSkeleton.svelte";
   import SafeImg from "../atoms/SafeImg.svelte";
   import FaUserCircle from "svelte-icons/fa/FaUserCircle.svelte";
   import { getAuth } from "../stores/AuthStore";
@@ -123,7 +124,7 @@
   <div class="account-page">
     <h1>내 정보</h1>
     {#if loading}
-      <div class="account-card loading">계정 정보를 불러오는 중...</div>
+      <PageSkeleton sections={2} rows={2} showHeading={false} />
     {:else if account}
       <section class="account-card">
         <div class="section-title">team.gg 계정</div>
@@ -197,7 +198,6 @@
     background: linear-gradient(145deg, $color-surface-raised, $color-surface);
     box-shadow: $shadow-card;
 
-    &.loading,
     .empty,
     .hint {
       color: rgba(173, 182, 209, 0.6);

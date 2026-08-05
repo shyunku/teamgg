@@ -2,10 +2,14 @@
   export let width = "300px";
   export let height = "25px";
   export let padding = "auto";
+  export let radius = "4px";
 </script>
 
-<div class="loader" style={`width: ${width};  padding: ${padding}`}>
-  &nbsp;
+<div
+  class="loader"
+  style={`width: ${width}; height: ${height}; padding: ${padding}; border-radius: ${radius}`}
+  aria-hidden="true"
+>
   <div class="effect"></div>
 </div>
 
@@ -15,6 +19,7 @@
     /* padding: 25px 0; */
     box-sizing: border-box;
     position: relative;
+    flex: 0 0 auto;
   }
 
   .effect {
@@ -23,7 +28,7 @@
     left: 0;
     width: 100%;
     height: 100%;
-    border-radius: 4px;
+    border-radius: inherit;
     background-color: white;
     opacity: 0.15;
 

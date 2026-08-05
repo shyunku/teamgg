@@ -15,6 +15,8 @@
   import { location, push } from "svelte-spa-router";
   import { updateSummonerInfo } from "../utils/Storage";
   import { toasts } from "svelte-toasts";
+  import MainContentLayout from "../layouts/MainContentLayout.svelte";
+  import PageSkeleton from "../molecules/PageSkeleton.svelte";
 
   export let params = {};
 
@@ -165,7 +167,11 @@
   {:else}
     <PlayerHeader summary={summonerInfo?.summary} extra={summonerInfo?.extra} {onTryRenew} {renewing} {loading} />
     <PlayerStatMenu bind:menu {summonerName} {summonerTag} />
-    {#if menu === PlayerInfoMenu.total}
+    {#if loading}
+      <MainContentLayout>
+        <PageSkeleton sections={2} rows={4} showHeading={false} />
+      </MainContentLayout>
+    {:else if menu === PlayerInfoMenu.total}
       {#if summonerInfo?.summary?.puuid != null}
         <PlayerContentTotal
           bind:summonerName

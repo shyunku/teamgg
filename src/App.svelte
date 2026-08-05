@@ -5,6 +5,7 @@
   import TopBar from "./organisms/TopBar.svelte";
   import { toasts, ToastContainer, FlatToast, BootstrapToast } from "svelte-toasts";
   import IpcSender from "./utils/IpcSender";
+  import ReplayAnalysisModal from "./organisms/replay-analysis/ReplayAnalysisModal.svelte";
 </script>
 
 <svelte:head>
@@ -18,6 +19,7 @@
 <div class="content">
   <Router {routes} />
 </div>
+<ReplayAnalysisModal />
 <ToastContainer placement="top-right" showProgress={true} width={"360px"} let:data>
   <FlatToast {data} />
 </ToastContainer>

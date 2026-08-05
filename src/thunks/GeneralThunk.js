@@ -15,6 +15,18 @@ const normalizeServerHost = (host) => {
 
 export const ServerHostBase = normalizeServerHost(APP_SERVER_HOST);
 const ServerHost = `${ServerHostBase}/v1`;
+let dataDragonVersion = "";
+
+export const initializeServerRuntime = async () => {
+  const response = await axios.get(`${ServerHostBase}/`, { timeout: 3000 });
+  dataDragonVersion = String(response.data?.dataDragonVersion ?? "").trim();
+};
+
+const versionedIconUrl = (url) => {
+  if (!dataDragonVersion) return url;
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}v=${encodeURIComponent(dataDragonVersion)}`;
+};
 
 console.log("ServerHost", ServerHost);
 
@@ -414,60 +426,96 @@ export const getTierRankByRatingPointReq = async (ratingPoint) => {
 };
 
 /* ---------------------- statistics ---------------------- */
+const StatisticsClientCacheTtl = 5 * 60 * 1000;
+const statisticsResponseCache = new Map();
+
+const getStatisticsCached = async (key, path) => {
+  const now = Date.now();
+  const cached = statisticsResponseCache.get(key);
+  if (cached?.data != null && cached.expiresAt > now) return cached.data;
+  if (cached?.promise != null) return cached.promise;
+
+  const promise = instance
+    .get(path)
+    .then((response) => {
+      statisticsResponseCache.set(key, {
+        data: response.data,
+        expiresAt: Date.now() + StatisticsClientCacheTtl,
+        promise: null,
+      });
+      return response.data;
+    })
+    .catch((error) => {
+      statisticsResponseCache.delete(key);
+      throw error;
+    });
+  statisticsResponseCache.set(key, { data: cached?.data ?? null, expiresAt: 0, promise });
+  return promise;
+};
+
 export const getChampionStatisticsReq = async () => {
-  const response = await instance.get(`/platform/statistics/champion`);
-  return response.data;
+  return getStatisticsCached("champion", `/platform/statistics/champion`);
 };
 
 export const getChampionDetailStatisticsReq = async (championId) => {
-  const response = await instance.get(`/platform/statistics/champion-detail?championId=${championId}`);
-  return response.data;
+  return getStatisticsCached(
+    `champion-detail:${championId}`,
+    `/platform/statistics/champion-detail?championId=${championId}`,
+  );
 };
 
+let metaStatisticsPath = `/platform/statistics/meta-summary`;
 export const getMetaStatisticsReq = async () => {
-  const response = await instance.get(`/platform/statistics/meta`);
-  return response.data;
+  try {
+    return await getStatisticsCached("meta", metaStatisticsPath);
+  } catch (error) {
+    if (error?.response?.status !== 404 || metaStatisticsPath.endsWith("/meta")) throw error;
+    metaStatisticsPath = `/platform/statistics/meta`;
+    return getStatisticsCached("meta", metaStatisticsPath);
+  }
+};
+
+export const getFullMetaStatisticsReq = async () => {
+  return getStatisticsCached("meta-full", `/platform/statistics/meta`);
 };
 
 export const getTierStatisticsReq = async () => {
-  const response = await instance.get(`/platform/statistics/tier`);
-  return response.data;
+  return getStatisticsCached("tier", `/platform/statistics/tier`);
 };
 
 export const getMasteryStatisticsReq = async () => {
-  const response = await instance.get(`/platform/statistics/mastery`);
-  return response.data;
+  return getStatisticsCached("mastery", `/platform/statistics/mastery`);
 };
 
 /* ---------------------- links ---------------------- */
 
 export const profileIconUrl = (profileIconId = 0) => {
   // if (profileIconId == 0) return null;
-  return `${ServerHost}/icon/profile?id=${profileIconId}`;
+  return versionedIconUrl(`${ServerHost}/icon/profile?id=${profileIconId}`);
 };
 
 export const championIconUrl = (championId = 0) => {
   if (championId == 0) return null;
-  return `${ServerHost}/icon/champion?key=${championId}`;
+  return versionedIconUrl(`${ServerHost}/icon/champion?key=${championId}`);
 };
 
 export const centeredChampionSplashUrl = (championId = 0) => {
   if (championId == 0) return null;
-  return `${ServerHost}/icon/centered-splash-champion?key=${championId}`;
+  return versionedIconUrl(`${ServerHost}/icon/centered-splash-champion?key=${championId}`);
 };
 
 export const summonerSpellIconUrl = (spellId = 0) => {
   if (spellId == 0) return null;
-  return `${ServerHost}/icon/summonerSpell?id=${spellId}`;
+  return versionedIconUrl(`${ServerHost}/icon/summonerSpell?id=${spellId}`);
 };
 
 export const itemIconUrl = (itemId = 0) => {
   if (itemId == 0) return null;
-  return `${ServerHost}/icon/item?id=${itemId}`;
+  return versionedIconUrl(`${ServerHost}/icon/item?id=${itemId}`);
 };
 
 export const perkStyleIconUrl = (perkStyleId = 0) => {
   if (perkStyleId == 0) return null;
   perkStyleId = parseInt(perkStyleId);
-  return `${ServerHost}/icon/perkStyle?id=${perkStyleId}`;
+  return versionedIconUrl(`${ServerHost}/icon/perkStyle?id=${perkStyleId}`);
 };

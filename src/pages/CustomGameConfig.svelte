@@ -7,6 +7,9 @@
   import { onDestroy, onMount } from "svelte";
   import { socketStore } from "../stores/SocketStore";
   import socket from "socket.io-client/lib/socket";
+  import { openReplayAnalysisModal } from "../stores/ReplayAnalysisStore";
+  import MainContentLayout from "../layouts/MainContentLayout.svelte";
+  import PageSkeleton from "../molecules/PageSkeleton.svelte";
 
   export let params = {};
   let data = null;
@@ -26,6 +29,44 @@
   let isOptimizing = false;
   let viewingPuuids = [];
   let unsubscribeSocket = () => {};
+  let replayDragDepth = 0;
+  let replayFileDragging = false;
+  let loading = true;
+
+  const containsFiles = (event) => [...(event.dataTransfer?.types ?? [])].includes("Files");
+  const onReplayDragEnter = (event) => {
+    if (!containsFiles(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    replayDragDepth += 1;
+    replayFileDragging = true;
+  };
+  const onReplayDragOver = (event) => {
+    if (!containsFiles(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+  };
+  const onReplayDragLeave = (event) => {
+    if (!replayFileDragging) return;
+    event.stopPropagation();
+    replayDragDepth = Math.max(0, replayDragDepth - 1);
+    if (replayDragDepth === 0) replayFileDragging = false;
+  };
+  const onReplayDrop = (event) => {
+    const files = [...(event.dataTransfer?.files ?? [])];
+    if (files.length === 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    replayDragDepth = 0;
+    replayFileDragging = false;
+    const replay = files.find((file) => file.name.toLowerCase().endsWith(".rofl"));
+    if (!replay) {
+      toasts.add({ title: "파일 형식 오류", description: ".rofl 리플레이 파일을 선택해주세요.", type: "warning" });
+      return;
+    }
+    openReplayAnalysisModal({ file: replay, customGameId: params.id });
+  };
 
   const onViewersChanged = (payload) => {
     viewingPuuids = payload?.puuids ?? [];
@@ -48,6 +89,8 @@
   };
 
   const fetchAllData = async () => {
+    const initialLoad = data == null;
+    if (initialLoad) loading = true;
     try {
       const resp = await getCustomGameConfigurationInfo(params.id);
       data = resp;
@@ -71,6 +114,8 @@
       console.log(resp);
     } catch (err) {
       console.error(err);
+    } finally {
+      if (initialLoad) loading = false;
     }
   };
 
@@ -96,10 +141,27 @@
   });
 </script>
 
+<svelte:window
+  on:dragenter|capture={onReplayDragEnter}
+  on:dragover|capture={onReplayDragOver}
+  on:dragleave|capture={onReplayDragLeave}
+  on:drop|capture={onReplayDrop}
+/>
+
+{#if replayFileDragging}
+  <div class="replay-page-drop-overlay">
+    <div><strong>내전 리플레이 분석</strong><span>ROFL 파일을 놓아 업로드하세요.</span></div>
+  </div>
+{/if}
 <svelte:head>
   <title>내전 팀 구성</title>
 </svelte:head>
 
+{#if loading}
+  <MainContentLayout>
+    <PageSkeleton sections={3} rows={4} />
+  </MainContentLayout>
+{:else}
 <CustomGameHeader
   configId={data?.id}
   name={data?.name}
@@ -140,3 +202,35 @@
   {isOptimizing}
   {viewingPuuids}
 />
+{/if}
+<style lang="scss">
+  @import "../styles/variables.scss";
+
+  .replay-page-drop-overlay {
+    position: fixed;
+    z-index: 1100;
+    inset: 58px 0 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    background: rgba(2, 6, 20, 0.76);
+    backdrop-filter: blur(5px);
+
+    > div {
+      display: flex;
+      width: min(520px, calc(100vw - 40px));
+      height: 180px;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      border: 2px dashed $color-highlight;
+      border-radius: 12px;
+      background: rgba(79, 140, 255, 0.08);
+      box-shadow: 0 0 32px $color-highlight-glow;
+    }
+
+    strong { color: $color-text-primary; font-size: 20px; }
+    span { margin-top: 9px; color: $color-highlight-light; font-size: 13px; }
+  }
+</style>

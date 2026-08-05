@@ -4,6 +4,8 @@
   import ChampionDetailMenu from "../organisms/player/champion-statistics-detail/ChampionDetailMenu.svelte";
   import { getChampionDetailStatisticsReq, getChampionStatisticsReq } from "../thunks/GeneralThunk";
   import "./StatisticsChampionDetail.scss";
+  import MainContentLayout from "../layouts/MainContentLayout.svelte";
+  import PageSkeleton from "../molecules/PageSkeleton.svelte";
 
   export const ChampionDetailOptions = {
     META: { key: "meta", label: "빌드 및 메타" },
@@ -19,6 +21,7 @@
     banRate: 0,
   };
   let menuKey = ChampionDetailOptions.META.key;
+  let loading = true;
 
   $: {
     if (params?.championId != null) {
@@ -28,6 +31,7 @@
   }
 
   let loadChampionDetail = async (championId) => {
+    loading = true;
     try {
       const [detailResponse, statisticsResponse] = await Promise.all([
         getChampionDetailStatisticsReq(championId),
@@ -46,10 +50,18 @@
       data = detailResponse;
     } catch (e) {
       console.error(e);
+    } finally {
+      loading = false;
     }
   };
 </script>
 
+{#if loading}
+  <MainContentLayout>
+    <PageSkeleton sections={2} rows={4} />
+  </MainContentLayout>
+{:else}
 <ChampionDetailHeader {data} {rateMaxima} />
 <ChampionDetailMenu menus={ChampionDetailOptions} bind:menuKey />
 <ChampionDetailContent {menuKey} {data} />
+{/if}

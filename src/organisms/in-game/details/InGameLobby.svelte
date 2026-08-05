@@ -4,7 +4,7 @@
     centeredChampionSplashUrl,
     championIconUrl,
     getChampionStatisticsReq,
-    getMetaStatisticsReq,
+    getFullMetaStatisticsReq,
   } from "../../../thunks/GeneralThunk";
   import { MapKeyType, MapType, TeamLanePositionType, TeamPositionKeyType } from "../../../types/General";
   import LinePosition from "../../../molecules/LinePosition.svelte";
@@ -12,6 +12,7 @@
   import Dropdown from "../../../components/Dropdown.svelte";
   import IoIosArrowDown from "svelte-icons/io/IoIosArrowDown.svelte";
   import { formatRate } from "../../../utils/Util";
+  import SkeletonRows from "../../../molecules/SkeletonRows.svelte";
 
   export let mapId = null;
 
@@ -123,7 +124,7 @@
   const loadChampionMetas = async () => {
     try {
       loadingMetaData = true;
-      const resp = await getMetaStatisticsReq();
+      const resp = await getFullMetaStatisticsReq();
       const { data, patches, updatedAt } = resp;
       rawData = data;
       console.log(data);
@@ -163,7 +164,11 @@
       {/if}
     </div>
     <div class="recommendations">
-      {#if mapId === MapKeyType.SUMMONERS_RIFT}
+      {#if loadingMetaData}
+        <div class="recommendations-loading">
+          <SkeletonRows rows={5} height="70px" gap="8px" />
+        </div>
+      {:else if mapId === MapKeyType.SUMMONERS_RIFT}
         {#each selectedLineChampions as e (e.championId)}
           <div class="meta card">
             <div class="champion-image img">
@@ -193,3 +198,9 @@
     </div>
   </div>
 </div>
+
+<style>
+  .recommendations-loading {
+    width: 100%;
+  }
+</style>

@@ -9,6 +9,7 @@
   import IoIosCode from "svelte-icons/io/IoIosCode.svelte";
   import IoMdClose from "svelte-icons/io/IoMdClose.svelte";
   import IoIosCopy from "svelte-icons/io/IoIosCopy.svelte";
+  import IoIosFilm from "svelte-icons/io/IoIosFilm.svelte";
   import "./CustomGameContent.scss";
   import NameTagSearchInput from "../../molecules/NameTagSearchInput.svelte";
   import LinePosition from "../../molecules/LinePosition.svelte";
@@ -43,6 +44,7 @@
   import JsxUtil from "../../utils/JsxUtil";
   import { removeUnicode } from "../../utils/Common";
   import { getCustomGameErrorMessage } from "../../utils/ApiError";
+  import { openReplayAnalysisModal } from "../../stores/ReplayAnalysisStore";
 
   export let configId;
   export let candidates = [];
@@ -797,6 +799,10 @@
               <div class:disabled={!canManage || isOptimizing} class="option" on:mouseup={clearColors}>
                 <div class="icon"><IoIosCode /></div>
                 <div class="text">컬러 라벨 전체 삭제</div>
+              </div>
+              <div class="option" on:mouseup={() => openReplayAnalysisModal({ customGameId: configId })}>
+                <div class="icon"><span class="replay-icon"><IoIosFilm /></span></div>
+                <div class="text">내전 리플레이 분석</div>
               </div>
               <div class="option" on:mouseup={copyTeamsAsText}>
                 <div class="icon"><span class="copy-icon"><IoIosCopy /></span></div>

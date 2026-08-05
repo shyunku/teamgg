@@ -7,6 +7,9 @@
   import "./StatisticsTier.scss";
   import moment from "moment";
   import "moment/locale/ko";
+  import { toasts } from "svelte-toasts";
+  import Skeleton from "../../../molecules/Skeleton.svelte";
+  import SkeletonRows from "../../../molecules/SkeletonRows.svelte";
   moment.locale("ko");
 
   let rawData = null;
@@ -48,6 +51,7 @@
       console.log(queueGroups, refinedData);
     } catch (e) {
       console.error(e);
+      rawData = [];
       toasts.add({
         title: "티어/랭크 통계",
         description: "통계를 불러오는 중 오류가 발생했습니다.",
@@ -88,7 +92,9 @@
   <div class="content card">
     <div class="title">플레이어 통계 (티어 및 랭크)</div>
     <div class="description">해당 지표들은 team.gg에서 검색 또는 추적되는 플레이어들만 해당됩니다.</div>
-    <div class="updated-at">{moment(lastUpdateTime).format("YYYY년 M월 D일 a h시 mm분에 업데이트됨")}</div>
+    <div class="updated-at">
+      {#if rawData == null}<Skeleton width="230px" height="12px" />{:else}{moment(lastUpdateTime).format("YYYY년 M월 D일 a h시 mm분에 업데이트됨")}{/if}
+    </div>
     <div class="options">
       <div
         class={"option" + JsxUtil.classByEqual(rankType, RankQueueType.SOLO_RANK, "selected")}
@@ -116,6 +122,9 @@
     <div class="tier-list card">
       <div class="header">티어 통계 ({totalSummoners ?? 0}명)</div>
       <div class="tiers">
+        {#if rawData == null}
+          <SkeletonRows rows={9} height="40px" gap="2px" />
+        {:else}
         {#each queueData as q, ind}
           <div class="tier-group">
             {#each q.rankGroups as r}
@@ -142,17 +151,21 @@
             {/each}
           </div>
         {/each}
+        {/if}
       </div>
     </div>
     <div class="summoner-list card">
       <div class="header">플레이어 순위 (상위 {(rankers ?? []).length}명)</div>
       <div class="summoners">
+        {#if rawData == null}
+          <SkeletonRows rows={9} height="40px" gap="2px" />
+        {:else}
         {#each rankers ?? [] as r}
           {@const [tier, rank] = selectedGroup.split("-")}
           <div class="summoner">
             <div class="summoner-rank">{r.ranks}위</div>
             <div class="profile-img img">
-              <SafeImg src={profileIconUrl(r?.profileIconId)} />
+              <SafeImg src={profileIconUrl(r?.profileIconId)} loading="lazy" decoding="async" />
             </div>
             <div class="name-tag" on:click={(e) => goToPlayerPage(r.gameName, r.tagLine)}>
               <div class="game-name">{r.gameName}</div>
@@ -169,6 +182,7 @@
             <div class="win-rate">{((100 * r.wins) / (r.wins + r.losses)).toFixed(0)}%</div>
           </div>
         {/each}
+        {/if}
       </div>
     </div>
   </div>

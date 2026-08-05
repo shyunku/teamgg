@@ -13,12 +13,14 @@
   import { toasts } from "svelte-toasts";
   import { authStore } from "../stores/AuthStore";
   import { onDestroy, onMount } from "svelte";
+  import SkeletonRows from "../molecules/SkeletonRows.svelte";
 
   let recentCustoms = [];
   let joinedCustoms = [];
   let unsubscribeAuth = () => {};
   let authStateReceived = false;
   let configurationsLoaded = false;
+  let loadingConfigurations = true;
 
   const tryCreateCustomGameConfiguration = async () => {
     try {
@@ -34,6 +36,7 @@
   };
 
   const fetchConfigurations = async () => {
+    loadingConfigurations = true;
     try {
       const [ownedConfigurations, joinedConfigurations] = await Promise.all([
         getCustomGameConfigurations(),
@@ -50,6 +53,8 @@
       );
     } catch (err) {
       console.error(err);
+    } finally {
+      loadingConfigurations = false;
     }
   };
 
@@ -86,35 +91,53 @@
     <div class="custom-list recent-customs card">
       <div class="header">최근 내전 팀 구성</div>
       <div class="custom-configures">
-        {#each recentCustoms as r}
-          {@const lastUpdatedDt = new Date(r?.lastUpdatedAt ?? 0)}
-          <div class="recent-custom-game-configure" on:mouseup={(e) => goToCustomGameConfigPage(r?.id)}>
-            <div class="name">{r?.name}</div>
-            <div class="created-at">{toRelativeTime(lastUpdatedDt.getTime())} 수정됨</div>
-            <div class="fairness">밸런스: {((r?.balance?.fairness ?? 0) * 100).toFixed(0)}%</div>
-          </div>
-        {/each}
+        {#if loadingConfigurations}
+          <div class="configuration-skeleton"><SkeletonRows rows={3} height="45px" gap="1px" /></div>
+        {:else}
+          {#each recentCustoms as r}
+            {@const lastUpdatedDt = new Date(r?.lastUpdatedAt ?? 0)}
+            <div class="recent-custom-game-configure" on:mouseup={() => goToCustomGameConfigPage(r?.id)}>
+              <div class="name">{r?.name}</div>
+              <div class="created-at">{toRelativeTime(lastUpdatedDt.getTime())} 수정됨</div>
+              <div class="fairness">밸런스: {((r?.balance?.fairness ?? 0) * 100).toFixed(0)}%</div>
+            </div>
+          {:else}
+            <div class="empty-list">생성한 내전 팀 구성이 없습니다.</div>
+          {/each}
+        {/if}
       </div>
     </div>
     <div class="custom-list joined-customs card">
       <div class="header">내가 속한 팀 구성</div>
       <div class="custom-configures">
-        {#each joinedCustoms as configuration}
-          {@const lastUpdatedDt = new Date(configuration?.lastUpdatedAt ?? 0)}
-          <div
-            class="recent-custom-game-configure"
-            on:mouseup={() => goToCustomGameConfigPage(configuration?.id)}
-          >
-            <div class="name">{configuration?.name}</div>
-            <div class="created-at">{toRelativeTime(lastUpdatedDt.getTime())} 수정됨</div>
-            <div class="fairness">
-              밸런스: {((configuration?.balance?.fairness ?? 0) * 100).toFixed(0)}%
-            </div>
-          </div>
+        {#if loadingConfigurations}
+          <div class="configuration-skeleton"><SkeletonRows rows={3} height="45px" gap="1px" /></div>
         {:else}
-          <div class="empty-list">참가 중인 내전 팀 구성이 없습니다.</div>
-        {/each}
+          {#each joinedCustoms as configuration}
+            {@const lastUpdatedDt = new Date(configuration?.lastUpdatedAt ?? 0)}
+            <div
+              class="recent-custom-game-configure"
+              on:mouseup={() => goToCustomGameConfigPage(configuration?.id)}
+            >
+              <div class="name">{configuration?.name}</div>
+              <div class="created-at">{toRelativeTime(lastUpdatedDt.getTime())} 수정됨</div>
+              <div class="fairness">
+                밸런스: {((configuration?.balance?.fairness ?? 0) * 100).toFixed(0)}%
+              </div>
+            </div>
+          {:else}
+            <div class="empty-list">참가 중인 내전 팀 구성이 없습니다.</div>
+          {/each}
+        {/if}
       </div>
     </div>
   </div>
 </MainContentWrapper>
+
+<style>
+  .configuration-skeleton {
+    width: 100%;
+    padding: 1px;
+    box-sizing: border-box;
+  }
+</style>

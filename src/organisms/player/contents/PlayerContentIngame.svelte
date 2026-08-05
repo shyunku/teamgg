@@ -7,6 +7,7 @@
   import "./PlayerContentIngame.scss";
   import { fastInterval } from "../../../utils/Common";
   import { MapType, QueueType } from "../../../types/General";
+  import PageSkeleton from "../../../molecules/PageSkeleton.svelte";
 
   export let puuid = null;
 
@@ -48,7 +49,9 @@
 
 <MainContentLayout>
   <div class="content-wrapper">
-    {#if loading || data != null}
+    {#if loading}
+      <PageSkeleton sections={1} rows={5} showHeading={false} />
+    {:else if data != null}
       <div class="ingame-card active card">
         <div class="header">
           <div class="game-type">{QueueType?.[data?.gameQueueConfigId] ?? "게임모드"}</div>

@@ -111,6 +111,7 @@ export default {
     replace({
       preventAssignment: true,
       APP_SERVER_HOST: JSON.stringify(process.env.APP_SERVER_HOST),
+      APP_REPLAY_ANALYZER_HOST: JSON.stringify(process.env.APP_REPLAY_ANALYZER_HOST),
       APP_VERSION: JSON.stringify(PackageJson.version),
     }),
 
