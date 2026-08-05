@@ -1,13 +1,26 @@
 package platform
 
 import (
+	"fmt"
 	"github.com/gin-gonic/gin"
 	log "github.com/shyunku-libraries/go-logger"
 	"net/http"
 	"team.gg-server/service/statistics"
 	"team.gg-server/types"
 	"team.gg-server/util"
+	"time"
 )
+
+func setStatisticsCacheHeaders(c *gin.Context, key string, updatedAt time.Time) bool {
+	etag := fmt.Sprintf("%q", fmt.Sprintf("%s-%d", key, updatedAt.Unix()))
+	c.Header("Cache-Control", "public, max-age=300, s-maxage=300, stale-while-revalidate=3600")
+	c.Header("ETag", etag)
+	if c.GetHeader("If-None-Match") == etag {
+		c.Status(http.StatusNotModified)
+		return true
+	}
+	return false
+}
 
 func UseStatisticsRouter(r *gin.RouterGroup) {
 	g := r.Group("/statistics")
@@ -15,6 +28,7 @@ func UseStatisticsRouter(r *gin.RouterGroup) {
 	g.GET("/champion", GetChampionStatistics)
 	g.GET("/champion-detail", GetChampionStatisticsDetail)
 	g.GET("/meta", GetMetaStatistics)
+	g.GET("/meta-summary", GetMetaSummaryStatistics)
 	g.GET("/counter", GetCounterStatistics)
 	g.GET("/tier", GetTierStatistics)
 	g.GET("/mastery", GetMasteryStatistics)
@@ -30,6 +44,9 @@ func GetChampionStatistics(c *gin.Context) {
 
 	if data == nil {
 		util.AbortWithStrJson(c, http.StatusServiceUnavailable, "not found")
+		return
+	}
+	if setStatisticsCacheHeaders(c, "champion", data.UpdatedAt) {
 		return
 	}
 
@@ -85,18 +102,37 @@ func GetChampionStatisticsDetail(c *gin.Context) {
 }
 
 func GetMetaStatistics(c *gin.Context) {
-	statistics, err := statistics.ChampionDetailStatisticsRepo.Load()
+	data, err := statistics.ChampionDetailStatisticsRepo.Load()
 	if err != nil {
 		log.Error(err)
 		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	if statistics == nil {
+	if data == nil {
 		util.AbortWithStrJson(c, http.StatusServiceUnavailable, "statistics cache is not ready")
 		return
 	}
+	if setStatisticsCacheHeaders(c, "meta", data.UpdatedAt) {
+		return
+	}
+	c.JSON(http.StatusOK, data)
+}
 
-	c.JSON(http.StatusOK, statistics)
+func GetMetaSummaryStatistics(c *gin.Context) {
+	meta, err := statistics.ChampionDetailStatisticsRepo.LoadMeta()
+	if err != nil {
+		log.Error(err)
+		util.AbortWithStrJson(c, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	if meta == nil {
+		util.AbortWithStrJson(c, http.StatusServiceUnavailable, "statistics cache is not ready")
+		return
+	}
+	if setStatisticsCacheHeaders(c, "meta-summary", meta.UpdatedAt) {
+		return
+	}
+	c.JSON(http.StatusOK, meta)
 }
 
 func GetCounterStatistics(c *gin.Context) {

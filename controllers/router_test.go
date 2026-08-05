@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"team.gg-server/core"
+	"team.gg-server/service"
 	"testing"
 )
 
@@ -59,13 +60,14 @@ func TestServerVersion(t *testing.T) {
 		t.Fatalf("status: got %d, want %d", recorder.Code, http.StatusOK)
 	}
 	var response struct {
-		Version      string `json:"version"`
-		IsProduction bool   `json:"isProduction"`
+		Version           string `json:"version"`
+		IsProduction      bool   `json:"isProduction"`
+		DataDragonVersion string `json:"dataDragonVersion"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Version != core.Version || !response.IsProduction {
+	if response.Version != core.Version || !response.IsProduction || response.DataDragonVersion != service.DataDragonVersion {
 		t.Fatalf("body: got %+v, want version=%q isProduction=true", response, core.Version)
 	}
 }

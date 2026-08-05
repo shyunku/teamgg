@@ -16,6 +16,7 @@ import (
 	"team.gg-server/controllers/test"
 	v1 "team.gg-server/controllers/v1"
 	"team.gg-server/core"
+	"team.gg-server/service"
 )
 
 var GlobalLogger = log.GetLogger()
@@ -78,8 +79,9 @@ func configureGinMode() {
 
 func serverVersion(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
-		"version":      core.Version,
-		"isProduction": core.IsProduction,
+		"version":           core.Version,
+		"isProduction":      core.IsProduction,
+		"dataDragonVersion": service.DataDragonVersion,
 	})
 }
 

@@ -9,6 +9,18 @@ import (
 	"team.gg-server/util"
 )
 
+const iconShortCacheControl = "public, max-age=300, s-maxage=300"
+const iconVersionedCacheControl = "public, max-age=31536000, s-maxage=31536000, immutable"
+
+func setIconCacheHeaders(c *gin.Context, requestedVersion string) {
+	cacheControl := iconShortCacheControl
+	if requestedVersion != "" && requestedVersion == service.DataDragonVersion {
+		cacheControl = iconVersionedCacheControl
+	}
+	c.Header("Cache-Control", cacheControl)
+	c.Header("CDN-Cache-Control", cacheControl)
+}
+
 func UseIconRouter(r *gin.RouterGroup) {
 	g := r.Group("/icon")
 
@@ -21,7 +33,8 @@ func UseIconRouter(r *gin.RouterGroup) {
 }
 
 type GetChampionIconRequest struct {
-	Key string `form:"key" binding:"required"`
+	Key     string `form:"key" binding:"required"`
+	Version string `form:"v"`
 }
 
 func GetChampionIcon(c *gin.Context) {
@@ -39,11 +52,13 @@ func GetChampionIcon(c *gin.Context) {
 
 	championId := champion.Id
 	championIconUrl := "https://ddragon.leagueoflegends.com/cdn/" + service.DataDragonVersion + "/img/champion/" + championId + ".png"
+	setIconCacheHeaders(c, req.Version)
 	c.Redirect(http.StatusMovedPermanently, championIconUrl)
 }
 
 type GetCenteredSplashChampionRequest struct {
-	Key string `form:"key" binding:"required"`
+	Key     string `form:"key" binding:"required"`
+	Version string `form:"v"`
 }
 
 func GetCenteredSplashChampion(c *gin.Context) {
@@ -67,12 +82,13 @@ func GetCenteredSplashChampion(c *gin.Context) {
 		return
 	}
 
-	c.Header("Cache-Control", "public, max-age=31536000")
+	setIconCacheHeaders(c, req.Version)
 	c.Data(http.StatusOK, "image/png", imgBytes)
 }
 
 type GetProfileIconRequest struct {
-	Id string `form:"id" binding:"required"`
+	Id      string `form:"id" binding:"required"`
+	Version string `form:"v"`
 }
 
 func GetProfileIcon(c *gin.Context) {
@@ -84,11 +100,13 @@ func GetProfileIcon(c *gin.Context) {
 	}
 
 	profileIconUrl := "https://ddragon.leagueoflegends.com/cdn/" + service.DataDragonVersion + "/img/profileicon/" + req.Id + ".png"
+	setIconCacheHeaders(c, req.Version)
 	c.Redirect(http.StatusMovedPermanently, profileIconUrl)
 }
 
 type GetSummonerSpellIconRequest struct {
-	Id string `form:"id" binding:"required"`
+	Id      string `form:"id" binding:"required"`
+	Version string `form:"v"`
 }
 
 func GetSummonerSpellIcon(c *gin.Context) {
@@ -113,12 +131,13 @@ func GetSummonerSpellIcon(c *gin.Context) {
 		return
 	}
 
-	c.Header("Cache-Control", "public, max-age=31536000")
+	setIconCacheHeaders(c, req.Version)
 	c.Data(http.StatusOK, "image/png", imgBytes)
 }
 
 type GetItemIconRequest struct {
-	Id string `form:"id" binding:"required"`
+	Id      string `form:"id" binding:"required"`
+	Version string `form:"v"`
 }
 
 func GetItemIcon(c *gin.Context) {
@@ -135,12 +154,13 @@ func GetItemIcon(c *gin.Context) {
 		return
 	}
 
-	c.Header("Cache-Control", "public, max-age=31536000")
+	setIconCacheHeaders(c, req.Version)
 	c.Data(http.StatusOK, "image/png", imgBytes)
 }
 
 type GetPerkIconRequest struct {
-	Id int `form:"id" binding:"required"`
+	Id      int    `form:"id" binding:"required"`
+	Version string `form:"v"`
 }
 
 func GetPerkStyleIcon(c *gin.Context) {
@@ -169,5 +189,6 @@ func GetPerkStyleIcon(c *gin.Context) {
 	re := regexp.MustCompile(`(?m)/perk-images/(.*)`)
 	perkImgPath := re.FindStringSubmatch(perkImgPathRaw)[1]
 	path := "https://ddragon.leagueoflegends.com/cdn/img/perk-images/" + perkImgPath
+	setIconCacheHeaders(c, req.Version)
 	c.Redirect(http.StatusMovedPermanently, path)
 }

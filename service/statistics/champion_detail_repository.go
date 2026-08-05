@@ -163,16 +163,41 @@ type ChampionDetailStatistics struct {
 	Data      map[int]ChampionDetailStatisticsItem `json:"data"`
 }
 
+// MetaStatistics contains only the fields required by the meta list page.
+// Full rune, item and counter data stays in ChampionDetailStatistics for the
+// champion detail endpoints.
+type MetaStatistics struct {
+	UpdatedAt time.Time            `json:"updatedAt"`
+	Patches   []string             `json:"patches"`
+	Data      []MetaStatisticsItem `json:"data"`
+}
+
+type MetaStatisticsItem struct {
+	MetaKey      string  `json:"metaKey"`
+	Lane         string  `json:"lane"`
+	ChampionId   int     `json:"championId"`
+	ChampionName string  `json:"championName"`
+	MajorTag     string  `json:"majorTag"`
+	MinorTag     *string `json:"minorTag"`
+	ItemTree     []int   `json:"itemTree"`
+	Count        int     `json:"count"`
+	WinRate      float64 `json:"winRate"`
+	AvgPickRate  float64 `json:"avgPickRate"`
+	AvgBanRate   float64 `json:"avgBanRate"`
+}
+
 type ChampionDetailStatisticsRepository struct {
-	mu     sync.RWMutex
-	Cache  *ChampionDetailStatistics
-	config RunnerConfig
+	mu        sync.RWMutex
+	Cache     *ChampionDetailStatistics
+	MetaCache *MetaStatistics
+	config    RunnerConfig
 }
 
 func NewChampionDetailStatisticsRepository(config RunnerConfig) *ChampionDetailStatisticsRepository {
 	cdsr := &ChampionDetailStatisticsRepository{
-		Cache:  nil,
-		config: config,
+		Cache:     nil,
+		MetaCache: nil,
+		config:    config,
 	}
 	value, err := cdsr.Load()
 	if err != nil {
@@ -902,6 +927,34 @@ func (cdsr *ChampionDetailStatisticsRepository) Load() (*ChampionDetailStatistic
 	return cached, nil
 }
 
+func (cdsr *ChampionDetailStatisticsRepository) LoadMeta() (*MetaStatistics, error) {
+	cdsr.mu.RLock()
+	meta := cdsr.MetaCache
+	cdsr.mu.RUnlock()
+	if meta != nil {
+		return meta, nil
+	}
+
+	data, err := cdsr.Load()
+	if err != nil {
+		return nil, err
+	}
+	meta = buildMetaStatistics(data)
+	cdsr.mu.RLock()
+	cachedMeta := cdsr.MetaCache
+	cdsr.mu.RUnlock()
+	if cachedMeta != nil {
+		return cachedMeta, nil
+	}
+	cdsr.mu.Lock()
+	if cdsr.MetaCache == nil {
+		cdsr.MetaCache = meta
+	}
+	meta = cdsr.MetaCache
+	cdsr.mu.Unlock()
+	return meta, nil
+}
+
 func (cdsr *ChampionDetailStatisticsRepository) getCache() *ChampionDetailStatistics {
 	cdsr.mu.RLock()
 	defer cdsr.mu.RUnlock()
@@ -909,7 +962,92 @@ func (cdsr *ChampionDetailStatisticsRepository) getCache() *ChampionDetailStatis
 }
 
 func (cdsr *ChampionDetailStatisticsRepository) setCache(cache *ChampionDetailStatistics) {
+	metaCache := buildMetaStatistics(cache)
 	cdsr.mu.Lock()
 	defer cdsr.mu.Unlock()
 	cdsr.Cache = cache
+	cdsr.MetaCache = metaCache
+}
+
+func buildMetaStatistics(source *ChampionDetailStatistics) *MetaStatistics {
+	if source == nil {
+		return nil
+	}
+
+	result := &MetaStatistics{
+		UpdatedAt: source.UpdatedAt,
+		Patches:   source.Patches,
+		Data:      make([]MetaStatisticsItem, 0),
+	}
+	type laneMetaTree struct {
+		lane string
+		tree *ChampionDetailStatisticsMetaTree
+	}
+
+	for _, champion := range source.Data {
+		lanes := []laneMetaTree{
+			{lane: "top", tree: champion.MetaTree.Top},
+			{lane: "jungle", tree: champion.MetaTree.Jungle},
+			{lane: "mid", tree: champion.MetaTree.Mid},
+			{lane: "adc", tree: champion.MetaTree.Adc},
+			{lane: "support", tree: champion.MetaTree.Support},
+		}
+		totalPickCount := 0
+		for _, lane := range lanes {
+			if lane.tree != nil {
+				totalPickCount += lane.tree.PickCount
+			}
+		}
+		if totalPickCount == 0 {
+			continue
+		}
+
+		for _, lane := range lanes {
+			if lane.tree == nil || lane.tree.PickCount == 0 || float64(lane.tree.PickCount)/float64(totalPickCount) < 0.15 {
+				continue
+			}
+			var highestWinRate *ChampionDetailStatisticsMeta
+			var highestPickCount *ChampionDetailStatisticsMeta
+			for i := range lane.tree.MetaPicks {
+				meta := &lane.tree.MetaPicks[i]
+				if meta.Count < 5 || float64(meta.Count)/float64(lane.tree.PickCount) < 0.1 {
+					continue
+				}
+				if highestWinRate == nil || meta.WinRate > highestWinRate.WinRate {
+					highestWinRate = meta
+				}
+				if highestPickCount == nil || meta.Count > highestPickCount.Count {
+					highestPickCount = meta
+				}
+			}
+
+			selected := []*ChampionDetailStatisticsMeta{highestWinRate, highestPickCount}
+			for index, meta := range selected {
+				if meta == nil || (index == 1 && highestWinRate != nil && meta.MetaKey == highestWinRate.MetaKey) {
+					continue
+				}
+				items := meta.ItemTree
+				if len(items) > 3 {
+					items = items[:3]
+				}
+				result.Data = append(result.Data, MetaStatisticsItem{
+					MetaKey:      meta.MetaKey,
+					Lane:         lane.lane,
+					ChampionId:   champion.ChampionId,
+					ChampionName: champion.ChampionName,
+					MajorTag:     meta.MajorTag,
+					MinorTag:     meta.MinorTag,
+					ItemTree:     items,
+					Count:        meta.Count,
+					WinRate:      meta.WinRate,
+					AvgPickRate:  float64(meta.Count) / float64(lane.tree.PickCount),
+					AvgBanRate:   champion.AvgBanRate,
+				})
+			}
+		}
+	}
+	sort.SliceStable(result.Data, func(i, j int) bool {
+		return result.Data[i].ChampionName < result.Data[j].ChampionName
+	})
+	return result
 }
