@@ -1,0 +1,291 @@
+@import "../styles/variables.scss";
+
+@media screen and (max-width: 720px) {
+  .app-icon-wrapper {
+    display: none !important;
+  }
+
+  .app-menu {
+    margin-left: 0 !important;
+  }
+}
+
+@media screen and (max-width: 580px) {
+  .app-header {
+    height: 50px !important;
+  }
+
+  .app-menu-item,
+  .user-menu-item {
+    font-size: 16px !important;
+    padding: 0 12px !important;
+  }
+}
+
+@media screen and (max-width: 580px) {
+  .app-header {
+    height: 45px !important;
+  }
+
+  .app-menu-item,
+  .user-menu-item {
+    font-size: 16px !important;
+    padding: 0 12px !important;
+  }
+}
+
+@media screen and (max-width: 500px) {
+  .app-header {
+    height: 40px !important;
+  }
+
+  .app-menu-item,
+  .user-menu-item {
+    font-size: 14px !important;
+    padding: 0 10px !important;
+  }
+}
+
+@media screen and (max-width: 440px) {
+  .app-header {
+    overflow-x: overlay;
+  }
+}
+
+.app-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 8, 22, 0.9);
+  color: $color-text-primary;
+  height: 60px;
+  // padding: 0 12px;
+  border-bottom: 1px solid $main-border-color;
+  backdrop-filter: blur(16px);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18);
+  // position: sticky;
+  // top: 0;
+  // left: 0;
+  // z-index: 1000;
+
+  .app-icon-wrapper {
+    display: flex;
+    height: 100%;
+    align-items: center;
+  }
+
+  .app-icon {
+    display: flex;
+    align-items: center;
+    width: 130px;
+    height: 30px;
+    background-color: transparent;
+    cursor: pointer;
+
+    img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+  }
+
+  .menu-item {
+  }
+
+  .app-menu {
+    display: flex;
+    margin-left: 30px;
+    align-items: center;
+    height: 100%;
+    font-weight: bold;
+
+    .app-menu-item {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      font-weight: bold;
+      height: 100%;
+      color: $color-text-secondary;
+      font-size: 21px;
+      padding: 0 18px;
+      background: transparent;
+      transition: 0.2s linear;
+      white-space: nowrap;
+
+      &.ingame {
+        color: $color-accent-hover;
+
+        &:hover {
+          background: linear-gradient(180deg, transparent 65%, $color-accent-soft 100%) !important;
+        }
+
+        &.selected {
+          background: transparent !important;
+        }
+      }
+
+      &:hover {
+        color: $color-text-primary;
+        background: linear-gradient(180deg, transparent 65%, $color-accent-soft 100%);
+      }
+
+      &.selected {
+        color: $color-text-primary;
+        background: transparent;
+        box-shadow: inset 0 -2px 0 $color-accent;
+      }
+
+      &:not(.selected):not(:hover) {
+        opacity: 0.6;
+      }
+
+      &:not(:last-child) {
+        // margin-right: 40px;
+      }
+    }
+  }
+
+  .user-menu {
+    display: flex;
+    margin-left: 30px;
+    height: 100%;
+    align-items: center;
+    position: relative;
+
+    .user-menu-item {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      font-weight: bold;
+      height: 100%;
+      color: $color-text-secondary;
+      font-size: 21px;
+      padding: 0 18px;
+      background: linear-gradient(180deg, transparent 50%, transparent 100%);
+      transition: 0.2s linear;
+      white-space: nowrap;
+      border: 0;
+      font-family: inherit;
+
+      &:hover {
+        color: $color-text-primary;
+        background: linear-gradient(180deg, transparent 65%, $color-accent-soft 100%);
+      }
+
+      &.selected {
+        color: $color-text-primary;
+        background: transparent;
+        box-shadow: inset 0 -2px 0 $color-accent;
+      }
+    }
+
+    .account-trigger {
+      gap: 8px;
+      background: transparent;
+      font-size: 14px;
+
+      &:focus,
+      &:focus-visible {
+        outline: none;
+        border-color: transparent;
+        box-shadow: none;
+      }
+
+      &.selected:focus,
+      &.selected:focus-visible {
+        box-shadow: inset 0 -2px 0 $color-accent;
+      }
+
+      .riot-account-name {
+        color: $color-text-primary;
+      }
+
+      .account-name {
+        font-size: 14px;
+      }
+
+      .account-icon {
+        display: flex;
+        width: 24px;
+        height: 24px;
+        flex: 0 0 auto;
+        aspect-ratio: 1 / 1;
+
+        > svg {
+          width: 100%;
+          height: 100%;
+        }
+
+        .riot-profile-icon {
+          display: block;
+          width: 100%;
+          height: 100%;
+          border-radius: 50%;
+          object-fit: cover;
+        }
+      }
+
+      .account-chevron {
+        display: flex;
+        width: 10px;
+        height: 10px;
+        transition: transform 0.15s ease;
+      }
+
+      &.open .account-chevron {
+        transform: rotate(180deg);
+      }
+    }
+
+    .account-dropdown {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      position: absolute;
+      z-index: 1100;
+      top: calc(100% - 5px);
+      right: 0;
+      width: 150px;
+      padding: 4px 0;
+      box-sizing: border-box;
+      border: 1px solid $main-border-color;
+      border-radius: 8px;
+      background: $color-surface-raised;
+      box-shadow: $shadow-card;
+
+      button {
+        display: block;
+        flex: 0 0 30px;
+        width: 100%;
+        height: 30px;
+        min-height: 30px;
+        padding: 0 12px;
+        box-sizing: border-box;
+        border: 0;
+        background: transparent;
+        color: $color-text-secondary;
+        font-family: inherit;
+        font-size: 12px;
+        line-height: 30px;
+        text-align: left;
+        cursor: pointer;
+
+        &:hover {
+          background: $color-accent-soft;
+          color: $color-text-primary;
+        }
+
+        &.logout {
+          color: $color-danger;
+
+          &:hover {
+            background: var(--color-danger-soft);
+            color: $color-danger;
+          }
+        }
+      }
+    }
+  }
+}

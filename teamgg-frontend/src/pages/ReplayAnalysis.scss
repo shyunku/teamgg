@@ -1,0 +1,100 @@
+@import "../styles/variables.scss";
+
+.replay-result-page {
+  display: grid;
+  width: 100%;
+  min-height: calc(100vh - 58px);
+  grid-template-columns: 270px minmax(0, 1fr);
+  gap: 18px;
+  padding: 24px 0 60px;
+  box-sizing: border-box;
+  align-items: start;
+
+  .analysis-sidebar {
+    position: sticky;
+    top: 18px;
+    max-height: calc(100vh - 94px);
+
+    .sidebar-header {
+      display: flex;
+      height: 48px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 14px;
+      border-bottom: 1px solid $color-border;
+      box-sizing: border-box;
+      font-size: 13px;
+
+      button {
+        display: flex; width: 30px; height: 30px; align-items: center; justify-content: center;
+        border: 0; border-radius: 5px; color: $color-highlight-light; cursor: pointer;
+        &:hover { background: $color-surface-hover; }
+        svg { width: 17px; height: 17px; }
+      }
+    }
+  }
+
+  .analysis-list {
+    max-height: calc(100vh - 144px);
+    overflow-y: auto;
+    .empty { padding: 30px 15px; color: $color-text-muted; font-size: 12px; text-align: center; }
+  }
+
+  .analysis-item {
+    display: flex; min-height: 60px; align-items: center; padding: 9px 8px 9px 13px;
+    border-bottom: 1px solid $color-border; box-sizing: border-box; cursor: pointer;
+    &:hover { background: $color-surface-hover; }
+    &.active { background: $color-accent-soft; box-shadow: inset 3px 0 $color-accent; }
+
+    .item-text {
+      display: flex; min-width: 0; flex: 1; flex-direction: column;
+      strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; }
+      span { margin-top: 5px; color: $color-text-muted; font-size: 9px; }
+    }
+
+    .delete {
+      display: flex; width: 27px; height: 27px; flex: 0 0 27px; align-items: center; justify-content: center;
+      border: 0; border-radius: 5px; color: $color-text-muted;
+      &:hover { background: var(--color-danger-soft); color: $color-danger; }
+      svg { width: 16px; height: 16px; }
+    }
+  }
+
+  .analysis-content {
+    min-width: 0;
+    .back {
+      display: inline-flex; height: 32px; align-items: center; gap: 6px; margin-bottom: 14px; padding: 0 10px;
+      border: 0; border-radius: 5px; color: $color-text-secondary; cursor: pointer;
+      &:hover { background: $color-surface-hover; color: $color-text-primary; }
+      svg { width: 16px; height: 16px; }
+      span { font-size: 12px; }
+    }
+  }
+
+  .result-header {
+    padding: 4px 2px 17px;
+    h1 { margin: 0; color: $color-text-primary; font-size: 21px; }
+    p { margin: 7px 0 0; color: $color-text-muted; font-size: 11px; }
+  }
+
+  .result-card {
+    padding: 28px 32px 44px; border: 1px solid $color-border; border-radius: 10px;
+    background: linear-gradient(145deg, $color-surface-raised, $color-surface); box-shadow: $shadow-card; white-space: normal;
+  }
+
+  .missing-result {
+    padding: 70px 30px; border: 1px solid $color-border; border-radius: 10px; background: $color-surface; text-align: center;
+    h1 { margin: 0; font-size: 20px; }
+    p { color: $color-text-muted; font-size: 12px; }
+    button { margin-top: 12px; padding: 8px 14px; border-color: $color-highlight; border-radius: 5px; color: $color-highlight-light; cursor: pointer; }
+  }
+}
+
+@media (max-width: 800px) {
+  .replay-result-page {
+    display: flex; flex-direction: column;
+    .analysis-sidebar { position: static; width: 100%; max-height: 240px; }
+    .analysis-list { max-height: 190px; }
+    .result-card { padding: 20px; }
+  }
+}

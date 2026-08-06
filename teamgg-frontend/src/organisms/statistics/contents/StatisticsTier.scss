@@ -1,0 +1,250 @@
+.statistics-tier {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+
+  .content {
+    .options {
+      display: flex;
+      margin-top: 15px;
+      align-items: center;
+
+      .option {
+        display: flex;
+        justify-content: center;
+        cursor: pointer;
+        padding: 5px 8px;
+        width: 80px;
+        border-radius: 3px;
+        font-size: 13px;
+        background-color: var(--color-surface);
+        color: var(--color-text-secondary);
+
+        &:hover {
+          background-color: var(--color-surface-hover);
+        }
+
+        &.selected {
+          background-color: var(--color-accent-soft);
+          color: white;
+        }
+
+        &:not(:last-child) {
+          margin-right: 10px;
+        }
+      }
+    }
+  }
+
+  .tier-content {
+    display: flex;
+    margin-top: 15px;
+    align-items: flex-start;
+    width: 100%;
+    overflow-x: overlay;
+
+    .tier-list {
+      display: flex;
+      flex-direction: column;
+      width: 320px;
+      min-width: 280px;
+
+      .tiers {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+
+        .tier-group {
+          display: flex;
+          flex-direction: column;
+          width: 100%;
+          color: var(--color-text-muted);
+
+          &:not(:last-child) {
+            border-bottom: 1px solid #ffffff21;
+          }
+
+          .rank-group {
+            display: flex;
+            align-items: center;
+            padding: 8px 12px;
+            box-sizing: border-box;
+            font-size: 13px;
+            cursor: pointer;
+            position: relative;
+            border-left: 5px solid rgba(0, 0, 0, 0.2);
+            box-sizing: border-box;
+
+            &:not(:last-child) {
+              // border-bottom: 1px solid #ffffff21;
+            }
+
+            &:hover {
+              border-left: 5px solid var(--color-text-secondary);
+            }
+
+            &.selected {
+              border-left: 5px solid var(--color-accent-hover);
+              color: white;
+            }
+
+            .ratio-filler {
+              position: absolute;
+              top: 0;
+              left: 0;
+              width: 100%;
+              height: 100%;
+
+              .ratio {
+                background-color: rgba(255, 255, 255, 0.08);
+                height: 100%;
+              }
+            }
+
+            .tier-rank {
+              display: flex;
+              align-items: center;
+              flex: 1;
+
+              .rank {
+                margin-left: 5px;
+              }
+            }
+
+            .summoner-count {
+              width: 70px;
+              text-align: center;
+            }
+
+            .summoner-rate {
+              width: 50px;
+              margin-left: 10px;
+              text-align: center;
+            }
+
+            &.iron {
+              background-color: rgb(36, 36, 36);
+            }
+
+            &.bronze {
+              background-color: rgb(50, 40, 27);
+            }
+
+            &.silver {
+              background-color: var(--color-surface-raised);
+            }
+
+            &.gold {
+              background-color: rgb(66, 58, 35);
+            }
+
+            &.platinum {
+              background-color: rgb(41, 54, 61);
+            }
+
+            &.emerald {
+              background-color: rgb(35, 54, 45);
+            }
+
+            &.diamond {
+              background-color: rgb(59, 52, 72);
+            }
+
+            &.master {
+              background-color: rgb(75, 55, 68);
+            }
+
+            &.grandmaster {
+              background-color: rgb(70, 41, 41);
+            }
+
+            &.challenger {
+              background-color: rgb(67, 63, 40);
+            }
+          }
+        }
+      }
+    }
+
+    .summoner-list {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      margin-left: 15px;
+      min-width: 750px;
+
+      .summoner {
+        display: flex;
+        align-items: center;
+        padding: 8px 12px;
+        box-sizing: border-box;
+        font-size: 13px;
+        color: var(--color-text-secondary);
+
+        &:not(:last-child) {
+          border-bottom: 1px solid #ffffff21;
+        }
+
+        .summoner-rank {
+          width: 35px;
+          text-align: center;
+          font-weight: bold;
+          color: var(--color-text-muted);
+        }
+
+        .profile-img {
+          width: 30px;
+          height: 30px;
+          border-radius: 3px;
+          margin-left: 15px;
+        }
+
+        .name-tag {
+          display: flex;
+          align-items: center;
+          margin-left: 15px;
+          flex: 1;
+          cursor: pointer;
+
+          &:hover {
+            .game-name,
+            .tag-line {
+              color: var(--color-accent-hover);
+            }
+          }
+
+          .tag-line {
+            margin-left: 5px;
+          }
+        }
+
+        .tier-rank-wrapper {
+          display: flex;
+          width: 150px;
+          justify-content: center;
+        }
+
+        .league-points {
+          width: 90px;
+          text-align: center;
+        }
+
+        .win-lose {
+          display: flex;
+          align-items: center;
+          width: 150px;
+          justify-content: center;
+
+          .losses {
+            margin-left: 3px;
+          }
+        }
+
+        .win-rate {
+          width: 50px;
+          margin-left: 5px;
+        }
+      }
+    }
+  }
+}

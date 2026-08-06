@@ -1,0 +1,20 @@
+.detail-content > .summary {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+
+  .team {
+    display: flex;
+    flex-direction: column;
+
+    .header {
+      display: flex;
+      align-items: center;
+    }
+
+    .teammates {
+      display: flex;
+      flex-direction: column;
+    }
+  }
+}

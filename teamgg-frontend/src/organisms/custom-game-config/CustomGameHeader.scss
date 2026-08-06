@@ -1,0 +1,84 @@
+@import "../../styles/variables.scss";
+
+.custom-game-header {
+  border-bottom: 1px solid $sub-border-color;
+  width: 100%;
+  background:
+    radial-gradient(circle at 34% 15%, rgba(120, 76, 255, 0.12), transparent 38%),
+    linear-gradient(110deg, $color-surface 0%, rgba(13, 22, 48, 0.96) 55%, $color-surface 100%);
+  padding: 20px 0;
+  color: $color-text-secondary;
+
+  @media screen and (max-width: 570px) {
+    .header .title {
+      font-size: 25px !important;
+    }
+
+    .header .last-update-time {
+      font-size: 11px !important;
+    }
+  }
+
+  .header {
+    display: flex;
+    flex-direction: column;
+
+    .title-row {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .title {
+      font-size: 30px;
+      line-height: 1.2;
+      color: $color-text-primary;
+      font-weight: 700;
+    }
+
+    .title-input {
+      width: min(650px, calc(100% - 38px));
+      min-width: 180px;
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      border: 0;
+      border-bottom: 1px solid $highlight-color;
+      outline: 0;
+      background: transparent;
+      color: inherit;
+      font-family: inherit;
+    }
+
+  .edit-name {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: $color-text-muted;
+      cursor: pointer;
+      opacity: 0.75;
+
+      &:hover {
+        color: $color-accent-hover;
+        opacity: 1;
+      }
+
+      &:disabled {
+        color: $color-text-muted;
+        cursor: not-allowed;
+        opacity: 0.45;
+      }
+    }
+
+    .last-update-time {
+      font-size: 13px;
+      margin-top: 10px;
+    }
+  }
+}

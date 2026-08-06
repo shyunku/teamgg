@@ -1,0 +1,254 @@
+@import "../../styles/variables.scss";
+
+.player-header {
+  border-bottom: 1px solid $sub-border-color;
+  width: 100%;
+  background-color: $sub-bg-color;
+
+  @media screen and (max-width: 870px) {
+    .player-detail {
+      // TODO :: do not hide
+      display: none !important;
+    }
+  }
+
+  @media screen and (max-width: 550px) {
+    .player-profile-icon {
+      width: 90px !important;
+      height: 90px !important;
+      min-width: 90px !important;
+      min-height: 90px !important;
+    }
+    .player-profile-info {
+      .player-name {
+        .name {
+          font-size: 20px !important;
+        }
+        .tag {
+          font-size: 16px !important;
+        }
+      }
+    }
+    #renew_btn {
+      font-size: 12px !important;
+      padding: 8px 0 !important;
+      width: 100px !important;
+    }
+  }
+
+  @media screen and (max-width: 400px) {
+    overflow-x: overlay;
+  }
+
+  .player-info-summary {
+    display: flex;
+    width: 100%;
+    padding: 16px 0;
+
+    .player-profile-icon {
+      position: relative;
+      overflow: hidden;
+      border-radius: 5px;
+      width: 110px;
+      height: 110px;
+      border: 2px solid $main-fg-color;
+      box-sizing: border-box;
+
+      .player-level {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: absolute;
+        font-size: 13px;
+        // font-weight: bold;
+        bottom: 0;
+        padding: 7px 0;
+        width: 100%;
+        background-color: rgba(0, 0, 0, 0.6);
+      }
+    }
+
+    .player-profile-info {
+      display: flex;
+      // flex-direction: column;
+      justify-content: flex-start;
+      // padding: 5px 0;
+      margin-left: 20px;
+      flex: 1;
+
+      .profile-header {
+        display: flex;
+        flex-direction: column;
+        min-width: 280px;
+
+        .player-name {
+          display: flex;
+          font-size: 28px;
+          font-weight: bold;
+          align-items: flex-end;
+
+          .tag {
+            margin-left: 6px;
+            color: rgba(255, 255, 255, 0.25);
+            // font-weight: normal;
+            font-size: 22px;
+            margin-top: -5px;
+          }
+
+          .favorite-icon {
+            display: flex;
+            align-items: center;
+            height: 15px;
+            min-height: 15px;
+            min-width: 15px;
+            border-radius: 3px;
+            align-self: center;
+            margin-left: 10px;
+            padding: 5px 5px;
+            background-color: rgba(255, 255, 255, 0.083);
+            cursor: pointer;
+
+            // &:hover {
+            //   background-color: var(--color-border-strong);
+            // }
+
+            &.enabled {
+              background-color: var(--color-border-strong);
+              color: rgb(255, 199, 31);
+            }
+          }
+        }
+
+        .last-renewed-time {
+          font-size: 12px;
+          color: var(--color-text-muted);
+          margin-top: 8px;
+          flex: 1;
+        }
+
+        #renew_btn {
+          font-size: 14px;
+          margin-top: 10px;
+          padding: 10px 0;
+          background-color: $color-accent-soft;
+          color: $color-accent-light;
+          border: 1px solid rgba(139, 92, 246, 0.4);
+          border-radius: 5px;
+          width: 140px;
+          cursor: pointer;
+
+          &:hover:not(:disabled) {
+            background-color: $color-surface-hover;
+            border-color: $color-accent;
+            color: $color-text-primary;
+          }
+
+          &:disabled {
+            background-color: $color-surface-raised;
+            border-color: $color-border;
+            color: $color-text-muted;
+            cursor: not-allowed;
+          }
+        }
+      }
+
+      .player-detail {
+        display: flex;
+        flex-direction: column;
+        margin-left: 15px;
+        padding-left: 15px;
+        border-left: 1px solid rgba(255, 255, 255, 0.1);
+        flex: 1;
+
+        .last-tiers {
+          display: flex;
+          align-items: center;
+
+          .prev-tier {
+            display: flex;
+            align-items: center;
+            background-color: $color-surface-raised;
+            border: 1px solid $color-border;
+            font-size: 12px;
+            padding: 4px 6px;
+            border-radius: 3px;
+
+            &:not(:last-child) {
+              margin-right: 5px;
+            }
+
+            .label {
+              color: var(--color-accent-hover);
+              font-weight: bold;
+            }
+
+            .tier {
+              margin-left: 5px;
+              color: var(--color-text-muted);
+            }
+          }
+        }
+
+        .ranking,
+        .performance,
+        .mmr {
+          display: flex;
+          align-items: center;
+          margin-top: 10px;
+          font-size: 12px;
+
+          .header {
+            display: flex;
+            align-items: center;
+            width: 200px;
+
+            .label {
+              color: var(--color-text-muted);
+            }
+
+            .value {
+              display: flex;
+              align-items: center;
+              color: rgb(223, 166, 69);
+              margin-left: 5px;
+
+              .arrow {
+                margin-left: 3px;
+              }
+
+              .mmr-value {
+                margin-right: 3px;
+              }
+            }
+          }
+
+          .bar {
+            display: flex;
+            height: 100%;
+            background-color: var(--color-surface-raised);
+            margin-left: 12px;
+            border-radius: 2px;
+            overflow: hidden;
+            width: 140px;
+
+            .filler {
+              height: 100%;
+              background-color: var(--color-accent);
+              // background: linear-gradient(to right, rgb(129, 96, 40), rgb(200, 160, 92));
+              border-radius: 2px;
+              padding: 0 !important;
+            }
+          }
+        }
+
+        .mmr .value {
+          font-weight: bold;
+        }
+
+        .performance .filler {
+          filter: brightness(1.2);
+        }
+      }
+    }
+  }
+}

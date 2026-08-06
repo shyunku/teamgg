@@ -1,0 +1,281 @@
+.champion-detail-position-menu {
+  .page-menu-item {
+    display: flex;
+    align-items: center;
+    min-width: 70px !important;
+
+    .label {
+      margin-left: 5px;
+    }
+  }
+}
+
+.champion-meta-content {
+  width: 100%;
+
+  .content {
+    display: flex;
+    width: 100%;
+    margin-top: 30px;
+    align-items: flex-start;
+
+    .meta-list {
+      display: flex;
+      flex-direction: column;
+      width: 420px;
+
+      .body {
+        display: flex;
+        flex-direction: column;
+        padding: 0 0 !important;
+        max-height: 750px;
+        overflow-y: overlay;
+
+        .meta-item {
+          display: flex;
+          align-items: center;
+          font-size: 13px;
+          padding: 8px 12px;
+          border-left: 5px solid rgba(255, 255, 255, 0.1);
+          cursor: pointer;
+
+          &:hover {
+            border-left: 5px solid var(--color-text-secondary);
+            background-color: rgba(0, 0, 0, 0.2);
+          }
+
+          &.selected {
+            border-left: 5px solid var(--color-accent-hover);
+            color: rgb(245, 231, 202);
+          }
+
+          &:not(:last-child) {
+            border-bottom: 1px solid #ffffff10;
+          }
+
+          .champion {
+            display: flex;
+            align-items: center;
+            flex: 1;
+
+            .champion-icon {
+              width: 30px;
+              height: 30px;
+              border-radius: 3px;
+              overflow: hidden;
+              margin-right: 10px;
+
+              img {
+                transform: scale(1.1);
+              }
+            }
+
+            .champion-name {
+              // font-weight: bold;
+            }
+          }
+
+          .styles {
+            display: flex;
+            position: relative;
+
+            .primary-style-icon {
+              width: 24px;
+              height: 24px;
+              background: transparent !important;
+              border-radius: 3px;
+              overflow: hidden;
+
+              img {
+                transform: scale(0.9);
+              }
+            }
+
+            .sub-style-icon {
+              width: 15px;
+              height: 15px;
+              background-color: rgba(0, 0, 0, 0.6);
+              border-radius: 50%;
+              overflow: hidden;
+
+              position: absolute;
+              bottom: -2px;
+              right: -2px;
+
+              img {
+                transform: scale(0.8);
+              }
+            }
+          }
+
+          .item-set {
+            display: flex;
+            align-items: center;
+            margin-left: 10px;
+
+            .item-icon {
+              width: 30px;
+              height: 30px;
+              border-radius: 3px;
+              overflow: hidden;
+
+              &:not(:last-child) {
+                margin-right: 5px;
+              }
+            }
+          }
+
+          .meta-name {
+            margin-left: 15px;
+            flex: 1;
+            font-weight: bold;
+            font-size: 13px;
+          }
+
+          .meta-plays {
+            width: 75px;
+            text-align: center;
+            margin-left: 10px;
+          }
+
+          .win-rate {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 5px 0;
+            width: 45px;
+            margin-left: 15px;
+            border-radius: 3px;
+          }
+
+          .rates {
+            display: flex;
+            align-items: center;
+
+            .rate {
+              display: flex;
+              align-items: flex-end;
+            }
+          }
+        }
+      }
+    }
+
+    .meta-detail {
+      display: flex;
+      flex-direction: column;
+      margin-left: 15px;
+      flex: 1;
+      overflow: hidden;
+
+      .body {
+        display: flex;
+        flex-direction: column;
+
+        .perk-style-details {
+          display: flex;
+          align-items: flex-end;
+          // align-items: center;
+          width: 100%;
+          justify-content: center;
+          margin-top: 20px;
+
+          .section {
+            display: flex;
+            flex-direction: column;
+
+            &:not(:first-child) {
+              margin-left: 40px;
+            }
+
+            &.primary-style-detail {
+              .perk-slots:first-child .perk-slot {
+                width: 48px !important;
+                height: 48px !important;
+              }
+            }
+
+            .perk-slots,
+            .stat-slots {
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              width: 100%;
+
+              &:not(:first-child) {
+                margin-top: 15px;
+              }
+
+              .perk-slot,
+              .stat-slot {
+                width: 32px;
+                height: 32px;
+                border: 1px solid transparent;
+                background: rgba(0, 0, 0, 0.7);
+                border-radius: 50%;
+                overflow: hidden;
+                opacity: 0.3;
+                filter: grayscale(100%);
+
+                &:not(:last-child) {
+                  margin-right: 10px;
+                }
+
+                img {
+                  transform: scale(0.95);
+                }
+
+                &.highlight {
+                  border-color: rgb(230, 193, 115);
+                  opacity: 1;
+                  filter: grayscale(0%);
+                }
+              }
+            }
+
+            .stat-slot {
+              width: 24px !important;
+              height: 24px !important;
+            }
+          }
+        }
+
+        .item-set,
+        .spell-set {
+          display: flex;
+          flex-direction: column;
+
+          &:not(:first-child) {
+            margin-top: 25px;
+          }
+
+          .label {
+            font-size: 14px;
+            font-weight: bold;
+          }
+
+          .item-list,
+          .spell-list {
+            display: flex;
+            align-items: center;
+            margin-top: 15px;
+            flex-wrap: wrap;
+
+            .item-icon,
+            .spell-icon {
+              width: 40px;
+              height: 40px;
+              border-radius: 3px;
+              overflow: hidden;
+              margin-bottom: 6px;
+
+              &:not(:last-child) {
+                margin-right: 6px;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

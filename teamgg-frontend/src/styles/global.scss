@@ -1,0 +1,223 @@
+// @import url("https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@100..900&display=swap");
+// @import url("https://fonts.googleapis.com/css2?family=Orbit&display=swap");
+@import "./variables.scss";
+
+@font-face {
+  font-family: "rix";
+  src: url("/fonts/RIXGOL.TTF") format("truetype");
+  font-weight: 100;
+}
+
+@font-face {
+  font-family: "rix";
+  src: url("/fonts/RIXGOM.TTF") format("truetype");
+  font-weight: 400;
+}
+
+@font-face {
+  font-family: "rix";
+  src: url("/fonts/RIXGOB.TTF") format("truetype");
+  font-weight: 700;
+}
+
+@font-face {
+  font-family: "rix";
+  src: url("/fonts/RIXGOEB.TTF") format("truetype");
+  font-weight: 900;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(circle at 50% -15%, rgba(87, 54, 190, 0.18), transparent 38%),
+    linear-gradient(180deg, $color-bg-base 0%, $color-bg-deep 100%);
+  color: $color-text-primary;
+  width: 100%;
+  min-height: 100vh;
+  // overflow: hidden;
+  // height: 100%;
+
+  // font-family: "rix", sans-serif;
+  font-family: "Noto Sans KR", sans-serif;
+  // font-family: "Orbit", sans-serif;
+  // font-family: "consolas", sans-serif;
+  // text-rendering: optimizeLegibility;
+}
+
+* {
+  font-smoothing: antialiased;
+  -webkit-font-smoothing: antialiased; /* 크롬, 사파리 등 웹킷 기반 브라우저용 */
+  -moz-osx-font-smoothing: grayscale; /* 파이어폭스용 */
+  // font-smooth: always; /* IE용 */
+
+  // only-css tricks
+  // -webkit-text-stroke: 0.3px;
+  // or
+  // -webkit-text-stroke: 0.45px rgba(0, 0, 0, 0.1);
+  // or
+  // text-shadow: #fff 0px 1px 1px;
+}
+
+input,
+select,
+button,
+textarea {
+  background-color: transparent;
+  border: 1px solid $color-border;
+  color: $color-text-primary;
+  margin: 0;
+  padding: 0;
+  font-family: inherit;
+
+  &:focus {
+    outline: none;
+    border-color: $color-accent;
+    box-shadow: 0 0 0 2px $color-accent-soft;
+  }
+}
+
+.img {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: rgba(0, 0, 0, 0.3);
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  background-color: $sub-bg-color;
+  border: 1px solid $color-border;
+  border-radius: 8px;
+  box-shadow: $shadow-card;
+  overflow: hidden;
+
+  & > .header {
+    padding: 10px 15px;
+    font-size: 13px;
+    font-weight: bold;
+    border-bottom: 1px solid $color-border;
+    color: $color-text-primary;
+  }
+
+  & > .body {
+    padding: 10px 15px;
+    // color: var(--color-text-primary);
+    color: $color-text-secondary;
+  }
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  // height: 6px;
+  height: 0;
+  background-color: rgba(0, 0, 0, 0);
+
+  &-thumb {
+    background-color: $color-border-strong;
+    border-radius: 10px;
+  }
+}
+
+.not-ready {
+  opacity: 0.3;
+  pointer-events: none;
+  cursor: not-allowed !important;
+}
+
+div {
+  white-space: nowrap;
+}
+
+.gg-grade {
+  color: rgb(220, 220, 220);
+
+  &.grade-F {
+    background-color: rgb(78, 78, 78) !important; // F
+  }
+
+  &.grade-E {
+    background-color: rgb(87, 61, 45) !important; // E
+  }
+
+  &.grade-D {
+    background-color: rgb(146, 119, 49) !important; // D
+  }
+
+  &.grade-C {
+    background-color: rgb(67, 109, 67) !important; // C
+  }
+
+  &.grade-B {
+    background-color: rgb(60, 114, 176) !important; // B
+  }
+
+  &.grade-A {
+    background: linear-gradient(150deg, rgb(174, 137, 242), rgb(88, 55, 148), rgb(143, 97, 228)) !important; // A
+    color: white;
+    text-shadow: 0 0 1px rgba(0, 0, 0);
+  }
+
+  &.grade-S {
+    background: linear-gradient(150deg, rgb(255, 165, 210), rgb(150, 45, 98), rgb(255, 96, 175)) !important; // S
+    color: white;
+    text-shadow: 0 0 1px rgba(0, 0, 0);
+  }
+
+  &.grade-SSS {
+    background: linear-gradient(
+      150deg,
+      rgb(63, 185, 255),
+      rgb(218, 183, 96),
+      rgb(18, 132, 207),
+      rgb(190, 228, 255),
+      rgb(255, 201, 63)
+    ) !important; // SSS
+    color: white;
+    box-shadow: 0 0 8px 0 rgba(255, 255, 255, 0.5);
+    text-shadow: 0 0 5px rgba(0, 0, 0);
+  }
+}
+
+.fat {
+  flex: 1;
+}
+
+.toast-container {
+  // min-width: 360px;
+  // width: auto !important;
+
+  .st-toast {
+    // min-width: 280px;
+    // width: auto !important;
+    // box-sizing: border-box;
+
+    .st-toast-details {
+      flex: 1;
+      overflow: hidden;
+
+      .st-toast-description {
+        font-size: 0.75rem !important;
+        color: rgb(195, 195, 195);
+        white-space: normal;
+        margin-top: 5px !important;
+      }
+    }
+  }
+
+  li {
+    justify-content: flex-end !important;
+  }
+}

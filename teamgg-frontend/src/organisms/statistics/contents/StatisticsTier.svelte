@@ -1,0 +1,189 @@
+<script>
+  import SafeImg from "../../../atoms/SafeImg.svelte";
+  import { getTierStatisticsReq, profileIconUrl } from "../../../thunks/GeneralThunk";
+  import { RankQueueType } from "../../../types/General";
+  import JsxUtil from "../../../utils/JsxUtil";
+  import TierRank from "../../../molecules/TierRank.svelte";
+  import "./StatisticsTier.scss";
+  import moment from "moment";
+  import "moment/locale/ko";
+  import { toasts } from "svelte-toasts";
+  import Skeleton from "../../../molecules/Skeleton.svelte";
+  import SkeletonRows from "../../../molecules/SkeletonRows.svelte";
+  moment.locale("ko");
+
+  let rawData = null;
+
+  let refinedData = {};
+  let lastUpdateTime = null;
+
+  let queueData = [];
+  let rankType = RankQueueType.SOLO_RANK;
+  let totalSummoners = 0;
+  let maxSummoners = 0;
+
+  let selectedGroup = null;
+  let rankers = null;
+
+  const getTierStatistics = async () => {
+    try {
+      const resp = await getTierStatisticsReq();
+      const { updatedAt, queueGroups } = resp;
+      rawData = queueGroups;
+      lastUpdateTime = updatedAt;
+      for (let queueGroup of queueGroups) {
+        refinedData[queueGroup.queueType] = queueGroup.rankGroups
+          .sort((a, b) => b.level - a.level)
+          .map((e) => {
+            return {
+              ...e,
+              rankGroups: e.rankGroups
+                .sort((a, b) => b.level - a.level)
+                .map((r) => {
+                  return {
+                    ...r,
+                    rankers: r.rankers.sort((a, b) => a.ranks - b.ranks),
+                  };
+                }),
+            };
+          });
+      }
+      console.log(queueGroups, refinedData);
+    } catch (e) {
+      console.error(e);
+      rawData = [];
+      toasts.add({
+        title: "티어/랭크 통계",
+        description: "통계를 불러오는 중 오류가 발생했습니다.",
+        type: "error",
+      });
+    }
+  };
+
+  const goToPlayerPage = (gameName, tagLine) => {
+    window.location.href = `#/player/${gameName}/${tagLine}`;
+  };
+
+  $: {
+    if (rawData) {
+      queueData = refinedData[rankType] ?? [];
+      totalSummoners = queueData.reduce(
+        (acc, cur) => acc + cur.rankGroups.reduce((acc2, cur2) => acc2 + cur2.summoners, 0),
+        0
+      );
+      maxSummoners = queueData.reduce(
+        (acc, cur) =>
+          Math.max(
+            acc,
+            cur.rankGroups.reduce((acc2, cur2) => Math.max(acc2, cur2.summoners), 0)
+          ),
+        0
+      );
+      if (selectedGroup == null) selectedGroup = queueData[0]?.tier + "-" + queueData[0]?.rankGroups[0]?.rank;
+      if (rankers == null) rankers = queueData[0]?.rankGroups[0]?.rankers;
+      console.log(queueData, totalSummoners, rankers);
+    }
+  }
+
+  getTierStatistics();
+</script>
+
+<div class="statistics-tier">
+  <div class="content card">
+    <div class="title">플레이어 통계 (티어 및 랭크)</div>
+    <div class="description">해당 지표들은 team.gg에서 검색 또는 추적되는 플레이어들만 해당됩니다.</div>
+    <div class="updated-at">
+      {#if rawData == null}<Skeleton width="230px" height="12px" />{:else}{moment(lastUpdateTime).format("YYYY년 M월 D일 a h시 mm분에 업데이트됨")}{/if}
+    </div>
+    <div class="options">
+      <div
+        class={"option" + JsxUtil.classByEqual(rankType, RankQueueType.SOLO_RANK, "selected")}
+        on:click={(e) => {
+          rankType = RankQueueType.SOLO_RANK;
+          selectedGroup = null;
+          rankers = null;
+        }}
+      >
+        솔로랭크
+      </div>
+      <div
+        class={"option" + JsxUtil.classByEqual(rankType, RankQueueType.FLEX_RANK, "selected")}
+        on:click={(e) => {
+          rankType = RankQueueType.FLEX_RANK;
+          selectedGroup = null;
+          rankers = null;
+        }}
+      >
+        자유랭크
+      </div>
+    </div>
+  </div>
+  <div class="tier-content">
+    <div class="tier-list card">
+      <div class="header">티어 통계 ({totalSummoners ?? 0}명)</div>
+      <div class="tiers">
+        {#if rawData == null}
+          <SkeletonRows rows={9} height="40px" gap="2px" />
+        {:else}
+        {#each queueData as q, ind}
+          <div class="tier-group">
+            {#each q.rankGroups as r}
+              {@const groupKey = `${q.tier}-${r.rank}`}
+              <div
+                class={"rank-group" +
+                  JsxUtil.classByCondition(selectedGroup == groupKey, "selected") +
+                  JsxUtil.class(q.tier?.toLowerCase())}
+                on:click={(e) => {
+                  selectedGroup = groupKey;
+                  rankers = r.rankers;
+                }}
+              >
+                <div class="ratio-filler">
+                  <div class="ratio" style={`width: ${(100 * r.summoners) / maxSummoners}%`}></div>
+                </div>
+                <div class="tier-rank">
+                  <div class="tier">{q.tier}</div>
+                  <div class="rank">{r.rank}</div>
+                </div>
+                <div class="summoner-count">{r.summoners}명</div>
+                <div class="summoner-rate">{((100 * r.summoners) / totalSummoners).toFixed(2)}%</div>
+              </div>
+            {/each}
+          </div>
+        {/each}
+        {/if}
+      </div>
+    </div>
+    <div class="summoner-list card">
+      <div class="header">플레이어 순위 (상위 {(rankers ?? []).length}명)</div>
+      <div class="summoners">
+        {#if rawData == null}
+          <SkeletonRows rows={9} height="40px" gap="2px" />
+        {:else}
+        {#each rankers ?? [] as r}
+          {@const [tier, rank] = selectedGroup.split("-")}
+          <div class="summoner">
+            <div class="summoner-rank">{r.ranks}위</div>
+            <div class="profile-img img">
+              <SafeImg src={profileIconUrl(r?.profileIconId)} loading="lazy" decoding="async" />
+            </div>
+            <div class="name-tag" on:click={(e) => goToPlayerPage(r.gameName, r.tagLine)}>
+              <div class="game-name">{r.gameName}</div>
+              <div class="tag-line">#{r.tagLine}</div>
+            </div>
+            <div class="tier-rank-wrapper">
+              <TierRank label={rankType === RankQueueType.SOLO_RANK ? "솔랭" : "자랭"} {tier} {rank} />
+            </div>
+            <div class="league-points">{r.leaguePoints} LP</div>
+            <div class="win-lose">
+              <div class="wins">{r.wins}승</div>
+              <div class="losses">{r.losses}패</div>
+            </div>
+            <div class="win-rate">{((100 * r.wins) / (r.wins + r.losses)).toFixed(0)}%</div>
+          </div>
+        {/each}
+        {/if}
+      </div>
+    </div>
+  </div>
+</div>
