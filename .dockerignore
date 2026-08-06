@@ -1,0 +1,11 @@
+.git
+.env
+.env.*
+node_modules
+dist
+.work
+.rofl-cache
+coverage
+output.log
+*.rofl
+*.tmp

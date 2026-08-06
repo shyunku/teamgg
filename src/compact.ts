@@ -1,0 +1,6 @@
+import type { ReplayPlayer } from "./domain.js";
+export interface CompactTable<T extends readonly string[] = readonly string[]> { fields: T; data: unknown[][]; }
+/** Repeated JSON objects become a schema-once table to reduce artifact and prompt size. */
+export function compactRows<T extends object, Fields extends readonly (keyof T & string)[]>(fields: Fields, rows: T[]): CompactTable<Fields> { return { fields, data: rows.map((row) => fields.map((field) => (row as Record<string, unknown>)[field] ?? null)) }; }
+const PLAYER_FIELDS = ["playerId", "riotId", "champion", "championId", "team", "won", "position", "level", "kills", "deaths", "assists", "goldEarned", "goldSpent", "visionScore", "totalDamageToChampions", "totalDamageTaken", "minionsKilled", "neutralMinionsKilled", "wardsPlaced", "wardsKilled", "objectivesStolen", "turretKills", "items", "paramKey", "championDamage", "damageTaken", "damageToObjectives", "damageToTurrets", "timeDeadSeconds", "ccTimeSeconds", "healing", "shieldingAllies", "controlWardsBought", "objectiveStealAssists", "afk", "leaver"] as const;
+export function compactPlayers(players: ReplayPlayer[]): CompactTable<typeof PLAYER_FIELDS> { return { fields: PLAYER_FIELDS, data: players.map((player) => { const flat: Record<string, unknown> = { ...player, ...player.metrics }; return PLAYER_FIELDS.map((field) => flat[field] ?? null); }) }; }
