@@ -692,14 +692,16 @@
       return acc;
     }, {});
 
-    for (let pos in TeamPositionType) {
-      const team1puuid = team1ParticipantsMap[pos] ?? null;
-      team1[pos] = candidateMap[team1puuid];
-    }
-    for (let pos in TeamPositionType) {
-      const team2puuid = team2ParticipantsMap[pos] ?? null;
-      team2[pos] = candidateMap[team2puuid];
-    }
+    team1 = Object.keys(TeamPositionType).reduce((acc, pos) => {
+      const puuid = team1ParticipantsMap[pos] ?? null;
+      acc[pos] = candidateMap[puuid] ?? null;
+      return acc;
+    }, {});
+    team2 = Object.keys(TeamPositionType).reduce((acc, pos) => {
+      const puuid = team2ParticipantsMap[pos] ?? null;
+      acc[pos] = candidateMap[puuid] ?? null;
+      return acc;
+    }, {});
 
     visibleCandidates = candidates
       .filter((c) => {
