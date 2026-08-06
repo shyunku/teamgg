@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/joho/godotenv"
 	log "github.com/shyunku-libraries/go-logger"
 	"io"
 	"net/http"
@@ -21,11 +20,6 @@ import (
 )
 
 func CheckEnvironmentVariables(checkKeys []string) error {
-	if err := godotenv.Load(); err != nil {
-		log.Error(err)
-		return err
-	}
-
 	missingVariables := make([]string, 0)
 	for _, key := range checkKeys {
 		if os.Getenv(key) == "" {

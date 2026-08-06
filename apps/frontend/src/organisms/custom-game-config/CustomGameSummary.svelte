@@ -10,8 +10,8 @@
   import RangeSlider from "svelte-range-slider-pips";
 
   export let balance;
-  export let team1TotalRatingPoint;
-  export let team2TotalRatingPoint;
+  export let team1TotalRatingPoint = 0;
+  export let team2TotalRatingPoint = 0;
   export let fetchAllData;
   export let socketConnected;
   export let configId;

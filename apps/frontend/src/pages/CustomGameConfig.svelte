@@ -13,8 +13,8 @@
   export let params = {};
   let data = null;
   let dataIndex = 0;
-  let team1TotalRatingPoint;
-  let team2TotalRatingPoint;
+  let team1TotalRatingPoint = 0;
+  let team2TotalRatingPoint = 0;
 
   let candidates = [];
   let weights = null;

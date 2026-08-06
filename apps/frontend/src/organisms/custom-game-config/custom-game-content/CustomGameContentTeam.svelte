@@ -151,7 +151,7 @@
     <div class="title">팀 {teamIndex}</div>
     <div class="rating">
       <div class="label">총 레이팅</div>
-      <div class="value">{totalRatingPoint} RP</div>
+      <div class="value">{Number.isFinite(totalRatingPoint) ? totalRatingPoint : 0} RP</div>
     </div>
     <div class="avg-tier">
       <div class="label">평균 티어</div>

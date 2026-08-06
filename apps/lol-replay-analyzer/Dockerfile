@@ -21,11 +21,10 @@ ENV NODE_ENV=production \
     ROFL_CACHE_DIR=/app/.rofl-cache
 
 WORKDIR /app
-COPY --from=builder --chown=node:node /app/package.json /app/package-lock.json ./
-COPY --from=builder --chown=node:node /app/node_modules ./node_modules
-COPY --from=builder --chown=node:node /app/dist/src ./dist/src
-RUN mkdir -p /app/.work /app/.rofl-cache \
-    && chown -R node:node /app
+COPY --from=builder /app/package.json /app/package-lock.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist/src ./dist/src
+RUN install -d -o node -g node /app/.work /app/.rofl-cache
 
 USER node
 VOLUME ["/app/.rofl-cache"]

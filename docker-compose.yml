@@ -12,6 +12,7 @@ services:
       - ${BACKEND_ENV_FILE:-./apps/backend/.env}
     environment:
       APP_SERVER_PORT: "7713"
+      DB_HOST: "${BACKEND_DB_HOST:-host.docker.internal}"
     ports:
       - "${BACKEND_BIND_ADDRESS:-0.0.0.0}:${BACKEND_PUBLISHED_PORT:-7713}:7713"
     extra_hosts:

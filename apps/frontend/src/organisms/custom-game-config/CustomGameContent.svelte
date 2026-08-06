@@ -49,8 +49,8 @@
   export let configId;
   export let candidates = [];
 
-  export let team1TotalRatingPoint;
-  export let team2TotalRatingPoint;
+  export let team1TotalRatingPoint = 0;
+  export let team2TotalRatingPoint = 0;
 
   export let updateBalance;
   export let fetchAllData;
