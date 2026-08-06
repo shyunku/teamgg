@@ -1,18 +1,18 @@
 # team.gg
 
-League of Legends 전적, 내전 팀 구성, 통계 및 ROFL 리플레이 분석 서비스를 함께 관리하는 모노레포입니다.
+This monorepo contains the team.gg League of Legends match history, custom-game team builder, statistics, and ROFL replay analysis services.
 
-## 구조
+## Repository structure
 
 ```text
-apps/frontend/             Svelte 웹 클라이언트
-apps/backend/              Go API 서버
-apps/lol-replay-analyzer/  Node.js/TypeScript ROFL 분석 서버
+apps/frontend/             Svelte web client
+apps/backend/              Go API server
+apps/lol-replay-analyzer/  Node.js/TypeScript ROFL analysis server
 ```
 
-## 개발 실행
+## Development
 
-각 서비스의 환경 파일을 준비한 뒤 세 서비스를 함께 실행합니다.
+Create the environment files for each service, then start all three services with Docker Compose.
 
 ```powershell
 Copy-Item .env.compose.example .env.compose
@@ -21,11 +21,11 @@ Copy-Item apps/lol-replay-analyzer/.env.docker.example apps/lol-replay-analyzer/
 docker compose --env-file .env.compose --profile development up --build
 ```
 
-상세한 Docker 및 운영 배포 방법은 [DOCKER.md](./DOCKER.md)를 참고하세요.
+See [DOCKER.md](./DOCKER.md) for detailed Docker and deployment instructions.
 
-## 운영 실행
+## Production
 
-프론트엔드를 S3에서 제공하는 운영 환경에서는 서버 두 개만 실행합니다.
+When the frontend is hosted on Amazon S3, start only the backend and replay analyzer services.
 
 ```powershell
 docker compose --env-file .env.compose up -d --build backend replay-analyzer
