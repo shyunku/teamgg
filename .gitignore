@@ -6,6 +6,3 @@ apps/lol-replay-analyzer/.env
 .idea/
 .vscode/
 *.log
-/teamgg-frontend/
-/teamgg-backend/
-/teamgg-lol-replay-analyzer/
