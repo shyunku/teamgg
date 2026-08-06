@@ -16,8 +16,8 @@ apps/lol-replay-analyzer/  Node.js/TypeScript ROFL 분석 서버
 
 ```powershell
 Copy-Item .env.compose.example .env.compose
-Copy-Item apps/backend/.env.docker.example apps/backend/.env.docker
-Copy-Item apps/lol-replay-analyzer/.env.docker.example apps/lol-replay-analyzer/.env.docker
+Copy-Item apps/backend/.env.docker.example apps/backend/.env
+Copy-Item apps/lol-replay-analyzer/.env.docker.example apps/lol-replay-analyzer/.env
 docker compose --env-file .env.compose --profile development up --build
 ```
 

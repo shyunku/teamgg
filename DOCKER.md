@@ -1,22 +1,22 @@
 # team.gg Docker 실행
 
-이 Compose 구성은 세 저장소만 실행합니다. MySQL과 Redis는 기존 로컬 또는 외부 인프라를 사용합니다.
+이 Compose 구성은 세 서비스를 실행합니다. MySQL과 Redis는 기존 로컬 또는 외부 인프라를 사용합니다.
 
 ## 최초 설정
 
-세 저장소의 상위 폴더에서 프로젝트별 환경파일을 만듭니다.
+모노레포 루트에서 프로젝트별 환경파일을 만듭니다.
 
 ```powershell
 Copy-Item .env.compose.example .env.compose
-Copy-Item apps/backend/.env.docker.example apps/backend/.env.docker
-Copy-Item apps/lol-replay-analyzer/.env.docker.example apps/lol-replay-analyzer/.env.docker
+Copy-Item apps/backend/.env.docker.example apps/backend/.env
+Copy-Item apps/lol-replay-analyzer/.env.docker.example apps/lol-replay-analyzer/.env
 ```
 
 각 파일의 역할은 분리되어 있습니다.
 
 - `.env.compose`: 공개 포트와 bind address만 관리하며 애플리케이션 비밀값은 넣지 않음
-- `apps/backend/.env.docker`: DB, Redis, Riot, RSO, JWT, 백엔드 실행 설정
-- `apps/lol-replay-analyzer/.env.docker`: OpenAI, 업로드, decoder, 분석 서버 실행 설정
+- `apps/backend/.env`: DB, Redis, Riot, RSO, JWT, 백엔드 실행 설정
+- `apps/lol-replay-analyzer/.env`: OpenAI, 업로드, decoder, 분석 서버 실행 설정
 - `apps/frontend/.env.dev`, `.env.production`: 기존 프론트 빌드 설정을 그대로 사용
 
 기존 프로젝트 `.env`를 그대로 사용하려면 `.env.compose`에서 경로만 바꿀 수도 있습니다.
@@ -59,7 +59,7 @@ docker compose --env-file .env.compose up -d --build backend replay-analyzer
 
 ## 운영: 서버 두 개만 실행
 
-운영 서버에서는 백엔드 `.env.docker`를 다음처럼 설정합니다.
+운영 서버에서는 백엔드 `.env`를 다음처럼 설정합니다.
 
 ```dotenv
 IS_PROD=true
@@ -68,7 +68,7 @@ REPLAY_ANALYZER_BASE_URL=https://replay-api.teamgg.kr
 RSO_CLIENT_CALLBACK_URI=https://api.teamgg.kr/v1/auth/rsoLogin
 ```
 
-분석 서버 `.env.docker`에는 다음 값을 설정합니다.
+분석 서버 `.env`에는 다음 값을 설정합니다.
 
 ```dotenv
 NODE_ENV=production

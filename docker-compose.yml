@@ -9,7 +9,7 @@ services:
     init: true
     restart: unless-stopped
     env_file:
-      - ${BACKEND_ENV_FILE:-./apps/backend/.env.docker}
+      - ${BACKEND_ENV_FILE:-./apps/backend/.env}
     environment:
       APP_SERVER_PORT: "7713"
     ports:
@@ -33,7 +33,7 @@ services:
     init: true
     restart: unless-stopped
     env_file:
-      - ${ANALYZER_ENV_FILE:-./apps/lol-replay-analyzer/.env.docker}
+      - ${ANALYZER_ENV_FILE:-./apps/lol-replay-analyzer/.env}
     environment:
       HOST: 0.0.0.0
       PORT: 7720
