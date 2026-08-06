@@ -1,0 +1,8 @@
+.env.compose
+
+teamgg-backend/.env.docker
+teamgg-lol-replay-analyzer/.env.docker
+
+.idea/
+.vscode/
+*.log

@@ -1,0 +1,86 @@
+name: teamgg
+
+services:
+  backend:
+    build:
+      context: ./teamgg-backend
+      dockerfile: Dockerfile
+      target: runtime
+    init: true
+    restart: unless-stopped
+    env_file:
+      - ${BACKEND_ENV_FILE:-./teamgg-backend/.env.docker}
+    environment:
+      APP_SERVER_PORT: "7713"
+    ports:
+      - "${BACKEND_BIND_ADDRESS:-0.0.0.0}:${BACKEND_PUBLISHED_PORT:-7713}:7713"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - backend_datafiles:/app/datafiles
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:7713/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
+
+  replay-analyzer:
+    build:
+      context: ./teamgg-lol-replay-analyzer
+      dockerfile: Dockerfile
+      target: runtime
+    init: true
+    restart: unless-stopped
+    env_file:
+      - ${ANALYZER_ENV_FILE:-./teamgg-lol-replay-analyzer/.env.docker}
+    environment:
+      HOST: 0.0.0.0
+      PORT: 7720
+      TEAMGG_API_BASE_URL: http://backend:7713
+      WORK_DIR: /app/.work
+      ROFL_CACHE_DIR: /app/.rofl-cache
+    ports:
+      - "${ANALYZER_BIND_ADDRESS:-0.0.0.0}:${ANALYZER_PUBLISHED_PORT:-7720}:7720"
+    depends_on:
+      backend:
+        condition: service_healthy
+    volumes:
+      - replay_work:/app/.work
+      - replay_decoder_cache:/app/.rofl-cache
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:7720/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  frontend:
+    profiles: ["development"]
+    build:
+      context: ./teamgg-frontend
+      dockerfile: Dockerfile
+      target: development
+    init: true
+    environment:
+      NODE_ENV: development
+    ports:
+      - "${FRONTEND_BIND_ADDRESS:-0.0.0.0}:${FRONTEND_PUBLISHED_PORT:-8080}:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+      replay-analyzer:
+        condition: service_healthy
+    volumes:
+      - ./teamgg-frontend:/app
+      - frontend_node_modules:/app/node_modules
+
+volumes:
+  backend_datafiles:
+  replay_work:
+  replay_decoder_cache:
+  frontend_node_modules:
