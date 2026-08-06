@@ -229,9 +229,6 @@ func getRecentMatchParticipantExtraMXDAOs(puuid string, count int) ([]MatchParti
 //}
 
 func GetMatchParticipantExtraMXDAOs_byMatchId(matchId string) ([]MatchParticipantExtraMXDAO, error) {
-	//if core.DebugOnProd {
-	//	defer util.InspectFunctionExecutionTime()()
-	//}
 	var details []MatchParticipantExtraMXDAO
 	if err := db.Root.Select(&details, `
 		SELECT m.*, mp.*, mpd.*

@@ -6,7 +6,6 @@ import (
 	log "github.com/shyunku-libraries/go-logger"
 	"strings"
 	"team.gg-server/libs/db"
-	"team.gg-server/util"
 )
 
 func CreateTemporaryTables(db db.Context, matchGameVersions []string) error {
@@ -332,8 +331,6 @@ func CreateTemporaryTables(db db.Context, matchGameVersions []string) error {
 			tableName = splited[6]
 		}
 
-		timer := util.NewTimer()
-		timer.Start()
 		if _, err := db.Exec(totalSql); err != nil {
 			log.Errorf("error occurred while creating %s", tableName)
 			log.Error(err)
@@ -341,7 +338,7 @@ func CreateTemporaryTables(db db.Context, matchGameVersions []string) error {
 		}
 
 		index += 1
-		log.Debugf("champion detail statistics meta CTT process: %d/%d (%s) complete in %s", index, len(totalSqls), tableName, timer.GetDuration())
+		log.Debugf("champion detail statistics meta CTT process: %d/%d (%s) complete", index, len(totalSqls), tableName)
 	}
 
 	return nil

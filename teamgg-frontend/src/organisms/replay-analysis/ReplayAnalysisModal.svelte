@@ -77,13 +77,22 @@
     push(`/replay-analysis/${encodeURIComponent(id)}`);
   };
 
-  const removeResult = (event, id) => {
+  const removeResult = async (event, id) => {
     event.stopPropagation();
     if (!window.confirm("이 리플레이 분석 내역을 삭제하시겠습니까?")) return;
-    deleteReplayAnalysis(id);
+    try {
+      await deleteReplayAnalysis(id);
+    } catch (err) {
+      toasts.add({
+        title: "분석 내역 삭제 실패",
+        description: err?.response?.data?.error?.message ?? err?.message ?? "분석 내역을 삭제하지 못했습니다.",
+        type: "error",
+      });
+    }
   };
 
-  $: isRunning = ["uploading", "analyzing"].includes($replayAnalysisStore.current?.status);
+  $: isRunning = ["queued", "uploading", "analyzing"].includes($replayAnalysisStore.current?.status);
+  $: canManage = $replayAnalysisStore.contextCanManage !== false;
 </script>
 
 {#if $replayAnalysisStore.modalOpen}
@@ -101,28 +110,28 @@
         <div class="upload-panel">
           <div
             class:dragging
-            class:disabled={isRunning}
+            class:disabled={isRunning || !canManage}
             class="drop-zone"
             on:dragenter|preventDefault={() => (dragging = true)}
             on:dragover|preventDefault={() => (dragging = true)}
             on:dragleave|preventDefault={() => (dragging = false)}
             on:drop={onDrop}
-            on:click={() => !isRunning && fileInput?.click()}
+            on:click={() => !isRunning && canManage && fileInput?.click()}
           >
             <div class="upload-icon"><IoIosCloudUpload /></div>
-            <strong>{isRunning ? "리플레이를 처리하고 있습니다" : "ROFL 파일을 여기에 놓으세요"}</strong>
-            <span>{isRunning ? "창을 닫아도 분석은 계속됩니다." : "클릭해서 파일을 직접 선택할 수도 있습니다."}</span>
+            <strong>{isRunning ? "리플레이를 처리하고 있습니다" : canManage ? "ROFL 파일을 여기에 놓으세요" : "리플레이 분석 내역"}</strong>
+            <span>{isRunning ? "창을 닫아도 분석은 계속됩니다." : canManage ? "클릭해서 파일을 직접 선택할 수도 있습니다." : "리플레이 업로드는 방장만 할 수 있습니다."}</span>
             <input
               bind:this={fileInput}
               type="file"
               accept=".rofl"
-              disabled={isRunning}
+              disabled={isRunning || !canManage}
               on:change={(event) => void submitFile(event.currentTarget.files?.[0])}
             />
           </div>
 
           {#if $replayAnalysisStore.current}
-            <div class:failed={$replayAnalysisStore.current.status === "error"} class="upload-progress-card">
+            <div class:failed={$replayAnalysisStore.current.status === "failed"} class="upload-progress-card">
               <div class="progress-header">
                 <div class="file-info">
                   <strong>{$replayAnalysisStore.current.fileName}</strong>
@@ -138,13 +147,15 @@
                 ></div>
               </div>
               <div class="progress-footer">
-                {#if $replayAnalysisStore.current.status === "error"}
+                {#if $replayAnalysisStore.current.status === "failed"}
                   <span class="error">{$replayAnalysisStore.current.error}</span>
                 {:else if $replayAnalysisStore.current.status === "completed"}
                   <span>분석 결과가 준비되었습니다.</span>
-                  <button on:click={() => viewResult($replayAnalysisStore.current.resultId)}>결과 보기</button>
+                  <button on:click={() => viewResult($replayAnalysisStore.current.id)}>결과 보기</button>
+                {:else if $replayAnalysisStore.current.status === "uploading"}
+                  <span>{$replayAnalysisStore.current.uploadProgress ?? 0}% 업로드됨 · 전체 {$replayAnalysisStore.current.progress ?? 0}%</span>
                 {:else}
-                  <span>{$replayAnalysisStore.current.status === "analyzing" ? "AI 분석은 수 분 정도 걸릴 수 있습니다." : `${$replayAnalysisStore.current.progress ?? 0}% 업로드됨`}</span>
+                  <span>전체 진행률 {$replayAnalysisStore.current.progress ?? 0}% · AI 분석은 수 분 정도 걸릴 수 있습니다.</span>
                 {/if}
               </div>
             </div>
@@ -172,12 +183,14 @@
                     <strong>{item.fileName}</strong>
                     <span>{formatDate(item.createdAt)} · {item.model ?? "AI 분석"}</span>
                   </div>
-                  <button
-                    class="delete"
-                    aria-label="분석 내역 삭제"
-                    title="삭제"
-                    on:click={(event) => removeResult(event, item.id)}
-                  ><IoIosTrash /></button>
+                  {#if canManage}
+                    <button
+                      class="delete"
+                      aria-label="분석 내역 삭제"
+                      title="삭제"
+                      on:click={(event) => removeResult(event, item.id)}
+                    ><IoIosTrash /></button>
+                  {/if}
                 </div>
               {/each}
             {/if}

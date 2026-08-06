@@ -243,8 +243,6 @@ func (cdsr *ChampionDetailStatisticsRepository) collectCoordinatedScheduled(ctx 
 
 func (cdsr *ChampionDetailStatisticsRepository) collect(database db.Context) (*ChampionDetailStatistics, error) {
 	log.Infof("Collecting %s statistics...", cdsr.key())
-	timer := util.NewTimerWithName("ChampionDetailStatisticsRepository")
-	timer.Start()
 
 	// collect recent versions
 	versionCount := 3 // 4 ~ 6 weeks
@@ -435,7 +433,7 @@ func (cdsr *ChampionDetailStatisticsRepository) collect(database db.Context) (*C
 		Data:      stats,
 	}
 
-	log.Infof("%s statistics collected successfully in %s", cdsr.key(), timer.GetDurationString())
+	log.Infof("%s statistics collected successfully", cdsr.key())
 	return collected, nil
 }
 

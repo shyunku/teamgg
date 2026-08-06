@@ -3,9 +3,7 @@ package models
 import (
 	"database/sql"
 	"errors"
-	"team.gg-server/core"
 	"team.gg-server/libs/db"
-	"team.gg-server/util"
 )
 
 type MatchDAO struct {
@@ -90,10 +88,6 @@ func GetOldestSummonerMatchDAO(db db.Context, puuid string) (*MatchDAO, bool, er
 }
 
 func GetMatchDAOs_byPuuid(db db.Context, puuid string, count int) ([]MatchDAO, error) {
-	if core.DebugOnProd {
-		defer util.InspectFunctionExecutionTime()()
-	}
-
 	var matches []MatchDAO
 	if err := db.Select(&matches, `
 		SELECT m.*
@@ -112,10 +106,6 @@ func GetMatchDAOs_byPuuid(db db.Context, puuid string, count int) ([]MatchDAO, e
 }
 
 func GetMatchDAOs_byPuuid_before(db db.Context, puuid string, before int64, count int) ([]MatchDAO, error) {
-	if core.DebugOnProd {
-		defer util.InspectFunctionExecutionTime()()
-	}
-
 	var matches []MatchDAO
 	if err := db.Select(&matches, `
 		SELECT m.*
@@ -135,10 +125,6 @@ func GetMatchDAOs_byPuuid_before(db db.Context, puuid string, before int64, coun
 }
 
 func GetMatchDAOs_byQueueId(db db.Context, puuid string, queueId, count int) ([]MatchDAO, error) {
-	if core.DebugOnProd {
-		defer util.InspectFunctionExecutionTime()()
-	}
-
 	var matches []MatchDAO
 	if err := db.Select(&matches, `
 		SELECT m.*
@@ -158,10 +144,6 @@ func GetMatchDAOs_byQueueId(db db.Context, puuid string, queueId, count int) ([]
 }
 
 func GetMatchDAOs_byQueueId_before(db db.Context, puuid string, queueId int, before int64, count int) ([]MatchDAO, error) {
-	if core.DebugOnProd {
-		defer util.InspectFunctionExecutionTime()()
-	}
-
 	var matches []MatchDAO
 	if err := db.Select(&matches, `
 		SELECT m.*

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/joho/godotenv"
 	log "github.com/shyunku-libraries/go-logger"
@@ -47,8 +48,12 @@ func main() {
 	}
 	log.Infof("Loading environment file: %s", environmentPath)
 	if err := godotenv.Load(environmentPath); err != nil {
-		log.Error(err)
-		os.Exit(-1)
+		if errors.Is(err, os.ErrNotExist) {
+			log.Info("Environment file not found; using process environment variables")
+		} else {
+			log.Error(err)
+			os.Exit(-1)
+		}
 	}
 
 	// Check environment variables
@@ -68,6 +73,8 @@ func main() {
 		"RSO_CLIENT_CALLBACK_URI",
 		"DEBUG",
 		"IS_PROD",
+		"REPLAY_ANALYZER_BASE_URL",
+		"REPLAY_ANALYZER_SHARED_SECRET",
 	}); err != nil {
 		log.Error(err)
 		os.Exit(-1)

@@ -3,6 +3,10 @@ package db
 import (
 	"context"
 	"github.com/redis/go-redis/v9"
+	log "github.com/shyunku-libraries/go-logger"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -11,11 +15,24 @@ type Redis struct {
 }
 
 func NewRedis() *Redis {
+	address := strings.TrimSpace(os.Getenv("REDIS_ADDR"))
+	if address == "" {
+		address = "localhost:6379"
+	}
+	database := 0
+	if rawDatabase := strings.TrimSpace(os.Getenv("REDIS_DB")); rawDatabase != "" {
+		parsedDatabase, err := strconv.Atoi(rawDatabase)
+		if err != nil || parsedDatabase < 0 {
+			log.Warnf("invalid REDIS_DB %q; using 0", rawDatabase)
+		} else {
+			database = parsedDatabase
+		}
+	}
 	r := &Redis{}
 	r.client = redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "",
-		DB:       0,
+		Addr:     address,
+		Password: os.Getenv("REDIS_PASSWORD"),
+		DB:       database,
 	})
 	return r
 }

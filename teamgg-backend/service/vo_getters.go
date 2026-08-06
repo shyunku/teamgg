@@ -3,7 +3,6 @@ package service
 import (
 	"fmt"
 	log "github.com/shyunku-libraries/go-logger"
-	"team.gg-server/core"
 	"team.gg-server/libs/db"
 	"team.gg-server/models"
 	"team.gg-server/models/mixed"
@@ -14,10 +13,6 @@ import (
 // vo_getters configure vo with VAO and mixed-VAO (null-safe)
 
 func GetSummonerSummaryVO_byPuuid(puuid string) (*SummonerSummaryVO, error) {
-	if core.DebugOnProd {
-		defer util.InspectFunctionExecutionTime()()
-	}
-
 	// find summoner by name on db
 	summonerDao, exists, err := models.GetSummonerDAO_byPuuid(db.Root, puuid)
 	if err != nil {
@@ -32,10 +27,6 @@ func GetSummonerSummaryVO_byPuuid(puuid string) (*SummonerSummaryVO, error) {
 }
 
 func GetSummonerExtraVO(puuid string, soloRank *SummonerRankVO) (*SummonerExtraVO, error) {
-	if core.DebugOnProd {
-		defer util.InspectFunctionExecutionTime()()
-	}
-
 	rankingVO, err := getSummonerRankingVO(puuid)
 	if err != nil {
 		log.Error(err)
@@ -105,12 +96,6 @@ func getSummonerRankingVO(puuid string) (*SummonerRankingVO, error) {
 // GetSummonerRankVO returns SummonerRankVO by puuid and rankType
 // this function assumes that summoner info & rank info has consistency
 func GetSummonerRankVO(puuid string, rankType string) (*SummonerRankVO, error) {
-	if core.DebugOnProd {
-		defer util.InspectFunctionExecutionTime()()
-	}
-	if core.DebugOnProd {
-		defer util.InspectFunctionExecutionTime()()
-	}
 	leagueDAO, exists, err := models.GetLeagueDAO(db.Root, puuid, rankType)
 	if err != nil {
 		log.Error(err)
@@ -128,9 +113,6 @@ func GetSummonerRankVO(puuid string, rankType string) (*SummonerRankVO, error) {
 }
 
 func GetSummonerMasteryVOs(puuid string) ([]SummonerMasteryVO, error) {
-	if core.DebugOnProd {
-		defer util.InspectFunctionExecutionTime()()
-	}
 	masteries, err := models.GetMasteryDAOs(db.Root, puuid)
 	if err != nil {
 		log.Error(err)
@@ -145,9 +127,6 @@ func GetSummonerMasteryVOs(puuid string) ([]SummonerMasteryVO, error) {
 
 // GetSummonerRecentMatchSummaryVOs_byQueueId 특정 플레이어의 최근 특정 큐 (ex. 솔랭, 자랭) 의 최근 매치 요약 정보를 가져옵니다.
 func GetSummonerRecentMatchSummaryVOs_byQueueId(puuid string, queueId, count int) ([]MatchSummaryVO, error) {
-	if core.DebugOnProd {
-		defer util.InspectFunctionExecutionTime()()
-	}
 	var matchDAOs []models.MatchDAO
 	var err error
 	if queueId == types.QueueTypeAll {
@@ -179,10 +158,6 @@ func GetSummonerMatchSummaryVOs_byQueueId_before(puuid string, queueId int, befo
 }
 
 func getSummonerMatchSummaryVOs(puuid string, matchDAOs []models.MatchDAO) ([]MatchSummaryVO, error) {
-	if core.DebugOnProd {
-		defer util.InspectFunctionExecutionTime()()
-	}
-
 	promise := util.NewPromise[models.MatchDAO, MatchSummaryVO]()
 	getMatchSummary := func(resolve chan<- MatchSummaryVO, reject chan<- error, matchDAO models.MatchDAO) {
 		matchExtraMXDAOs, err := mixed.GetMatchParticipantExtraMXDAOs_byMatchId(matchDAO.MatchId)

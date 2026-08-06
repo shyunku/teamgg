@@ -19,6 +19,7 @@ func UseV1Router(r *gin.Engine) {
 	g := r.Group("/v1")
 	UseIconRouter(g)
 	UseAuthRouter(g)
+	useReplayAnalysisInternalRouter(g)
 	platform.UsePlatformRouter(g)
 	api2.UseApiRouter(g)
 

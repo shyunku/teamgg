@@ -51,6 +51,11 @@ DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_NAME=team_gg
 
+# Redis (optional; defaults preserve the old localhost setup)
+REDIS_ADDR=127.0.0.1:6379
+REDIS_PASSWORD=
+REDIS_DB=0
+
 # JWT secrets and expiration times
 JWT_ACCESS_SECRET=your_jwt_access_secret
 JWT_ACCESS_EXPIRE=3600
@@ -65,6 +70,11 @@ RSO_CLIENT_CALLBACK_URI=http://localhost:8080/v1/auth/callback
 # Runtime environment and diagnostics
 DEBUG=true
 IS_PROD=false
+
+# Replay analyzer integration
+REPLAY_ANALYZER_BASE_URL=http://localhost:7720
+REPLAY_ANALYZER_SHARED_SECRET=replace-with-a-long-random-shared-secret
+REPLAY_ANALYSIS_STALE_AFTER=45m
 
 # Background DataExplorer jobs (optional)
 DATA_EXPLORER_ENABLED=true
@@ -102,6 +112,11 @@ STATISTICS_LOCK_TIMEOUT=1s
 Set a `DATA_EXPLORER_*_BUDGET` variable to `0` to disable that daily budget. Worker counts and budgets should be configured according to the rate limits of your Riot API product key.
 
 Statistics timing values use Go duration syntax, such as `30s`, `5m`, and `12h`. Each statistics job uses a different initial delay so that database aggregation jobs do not all start at once during server startup. `STATISTICS_LOCK_RETRY_DELAY` controls the short retry interval used when another statistics job holds the lock, while `STATISTICS_RETRY_DELAY` controls retries after an actual collection error. When multiple server instances are running, MySQL advisory locks and the shared `statistics_snapshots` cache prevent duplicate aggregation work.
+
+`REPLAY_ANALYZER_BASE_URL` is the public URL that browsers upload ROFL files to directly. `REPLAY_ANALYZER_SHARED_SECRET` must be the same long random value on this server and the replay analyzer; it signs short-lived upload tickets and authenticates analyzer status callbacks.
+`REPLAY_ANALYSIS_STALE_AFTER` releases a job that remained queued, uploading, or analyzing without a callback for too long. Keep it longer than the analyzer's `ANALYSIS_TIMEOUT`; the default is `45m`.
+
+When running in a container, the server can start entirely from process environment variables; a physical `.env` file is no longer required. `REDIS_ADDR` should point to a reachable Redis host such as `host.docker.internal:6379` or a managed Redis endpoint.
 
 ---
 

@@ -1,0 +1,13 @@
+.git
+.gitignore
+.idea
+.temp
+.env
+.env.*
+datafiles
+output.log
+*.pid
+teamgg
+teamgg.exe
+main
+*.test

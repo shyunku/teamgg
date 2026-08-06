@@ -13,10 +13,11 @@ import (
 const (
 	EventTest = "test"
 
-	EventJoinCustomConfigRoom        = "join_custom_config_room"
-	EventCustomConfigOptimizeProcess = "custom_config/optimize_process"
-	EventCustomConfigUpdated         = "custom_config/updated"
-	EventCustomConfigViewers         = "custom_config/viewers"
+	EventJoinCustomConfigRoom              = "join_custom_config_room"
+	EventCustomConfigOptimizeProcess       = "custom_config/optimize_process"
+	EventCustomConfigUpdated               = "custom_config/updated"
+	EventCustomConfigViewers               = "custom_config/viewers"
+	EventCustomConfigReplayAnalysisUpdated = "custom_config/replay_analysis_updated"
 )
 
 type UserSocket struct {

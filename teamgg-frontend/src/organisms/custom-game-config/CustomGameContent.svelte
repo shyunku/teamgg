@@ -800,7 +800,7 @@
                 <div class="icon"><IoIosCode /></div>
                 <div class="text">컬러 라벨 전체 삭제</div>
               </div>
-              <div class="option" on:mouseup={() => openReplayAnalysisModal({ customGameId: configId })}>
+              <div class="option" on:mouseup={() => openReplayAnalysisModal({ customGameId: configId, canManage })}>
                 <div class="icon"><span class="replay-icon"><IoIosFilm /></span></div>
                 <div class="text">내전 리플레이 분석</div>
               </div>

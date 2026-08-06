@@ -1,0 +1,10 @@
+.git
+.env
+.env.*
+!.env.dev
+!.env.production
+node_modules
+public/build
+logs
+.temp
+*.log

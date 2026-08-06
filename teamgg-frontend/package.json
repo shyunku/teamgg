@@ -10,9 +10,9 @@
     "local_app_server_endpoint": "http://localhost:7713"
   },
   "scripts": {
-    "build": "set NODE_ENV=production&& rollup -c",
-    "dev": "set NODE_ENV=development&& rollup -c -w",
-    "start": "sirv public --no-clear",
+    "build": "rollup -c --environment NODE_ENV:production",
+    "dev": "rollup -c -w --environment NODE_ENV:development",
+    "start": "sirv public --no-clear --host 0.0.0.0",
     "win-electron": "set ELECTRON_START_URL=http://localhost:8080 && set NODE_ENV=development && wait-on http://localhost:8080 && electron .",
     "mac-electron": "export ELECTRON_START_URL=http://localhost:8080 && export NODE_ENV=development && wait-on http://localhost:8080 && electron .",
     "desktop": "concurrently \"npm run dev\" \"npm run win-electron\"",

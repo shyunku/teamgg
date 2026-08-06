@@ -3,7 +3,6 @@ package models
 import (
 	"database/sql"
 	"errors"
-	"team.gg-server/core"
 	"team.gg-server/libs/db"
 	"team.gg-server/util"
 	"time"
@@ -43,10 +42,6 @@ func (s *SummonerDAO) Upsert(db db.Context) error {
 }
 
 func GetSummonerDAO_byNameTag(db db.Context, gameName string, tagLine string) (*SummonerDAO, bool, error) {
-	if core.DebugOnProd {
-		defer util.InspectFunctionExecutionTime()()
-	}
-
 	shortenName := util.ShortenSummonerName(gameName)
 	// check if summoner exists in db
 	var summonerEntity SummonerDAO

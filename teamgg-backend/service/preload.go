@@ -50,6 +50,9 @@ var (
 		if err := models.EnsureStatisticsSnapshotSchema(db); err != nil {
 			return err
 		}
+		if err := models.EnsureCustomGameReplayAnalysisSchema(db); err != nil {
+			return err
+		}
 
 		// find static data tables
 		var staticTierRankTable interface{}

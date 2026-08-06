@@ -3,11 +3,9 @@ package mixed
 import (
 	"database/sql"
 	"errors"
-	"team.gg-server/core"
 	"team.gg-server/libs/db"
 	"team.gg-server/models"
 	"team.gg-server/types"
-	"team.gg-server/util"
 	"time"
 )
 
@@ -19,10 +17,6 @@ type SummonerRankingMXDAO struct {
 }
 
 func GetSummonerSoloRankingMXDAO(db db.Context, puuid string) (*SummonerRankingMXDAO, error) {
-	if core.DebugOnProd {
-		defer util.InspectFunctionExecutionTime()()
-	}
-
 	var rankingMXDAO SummonerRankingMXDAO
 	summonerRankingDAO, found, err := models.GetSummonerRankingDAO(db, puuid)
 	if err != nil {

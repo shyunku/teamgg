@@ -7,7 +7,6 @@ import (
 	"team.gg-server/libs/db"
 	"team.gg-server/models/mixed/statistics_models"
 	"team.gg-server/service"
-	"team.gg-server/util"
 	"time"
 )
 
@@ -103,8 +102,6 @@ func (tsr *TierStatisticsRepository) collectCoordinatedScheduled(ctx context.Con
 
 func (tsr *TierStatisticsRepository) collect(database db.Context) (*TierStatistics, error) {
 	log.Infof("Collecting %s statistics...", tsr.key())
-	timer := util.NewTimerWithName("TierStatisticsRepository")
-	timer.Start()
 
 	// collect data
 	tierCountMXDAOs, err := statistics_models.GetTierStatisticsTierCountMXDAOs(database)
@@ -215,7 +212,7 @@ func (tsr *TierStatisticsRepository) collect(database db.Context) (*TierStatisti
 		QueueGroups: queueGroups,
 	}
 
-	log.Infof("%s statistics collected successfully in %s", tsr.key(), timer.GetDurationString())
+	log.Infof("%s statistics collected successfully", tsr.key())
 	return collected, nil
 }
 

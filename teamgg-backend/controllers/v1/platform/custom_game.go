@@ -127,6 +127,7 @@ func queueSummonerMatchesRefresh(configId, puuid string) {
 
 func UseCustomGameRouter(r *gin.RouterGroup) {
 	g := r.Group("/custom-game")
+	useReplayAnalysisRouter(g)
 
 	g.GET("/list", GetCustomGameConfigurationList)
 	g.GET("/joined-list", GetJoinedCustomGameConfigurationList)

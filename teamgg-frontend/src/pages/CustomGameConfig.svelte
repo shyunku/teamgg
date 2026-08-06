@@ -6,8 +6,7 @@
   import { getCustomGameBalanceReq, getCustomGameConfigurationInfo } from "../thunks/GeneralThunk";
   import { onDestroy, onMount } from "svelte";
   import { socketStore } from "../stores/SocketStore";
-  import socket from "socket.io-client/lib/socket";
-  import { openReplayAnalysisModal } from "../stores/ReplayAnalysisStore";
+  import { loadReplayAnalyses, openReplayAnalysisModal } from "../stores/ReplayAnalysisStore";
   import MainContentLayout from "../layouts/MainContentLayout.svelte";
   import PageSkeleton from "../molecules/PageSkeleton.svelte";
 
@@ -45,7 +44,7 @@
     if (!containsFiles(event)) return;
     event.preventDefault();
     event.stopPropagation();
-    event.dataTransfer.dropEffect = "copy";
+    event.dataTransfer.dropEffect = canManage ? "copy" : "none";
   };
   const onReplayDragLeave = (event) => {
     if (!replayFileDragging) return;
@@ -60,16 +59,30 @@
     event.stopPropagation();
     replayDragDepth = 0;
     replayFileDragging = false;
+    if (!canManage) {
+      toasts.add({ title: "권한 없음", description: "내전 리플레이 업로드는 방장만 할 수 있습니다.", type: "warning" });
+      return;
+    }
     const replay = files.find((file) => file.name.toLowerCase().endsWith(".rofl"));
     if (!replay) {
       toasts.add({ title: "파일 형식 오류", description: ".rofl 리플레이 파일을 선택해주세요.", type: "warning" });
       return;
     }
-    openReplayAnalysisModal({ file: replay, customGameId: params.id });
+    void openReplayAnalysisModal({ file: replay, customGameId: params.id, canManage }).catch((err) => {
+      toasts.add({
+        title: "리플레이 분석 실패",
+        description: err?.response?.data?.error?.message ?? err?.message ?? "리플레이 분석을 시작하지 못했습니다.",
+        type: "error",
+      });
+    });
   };
 
   const onViewersChanged = (payload) => {
     viewingPuuids = payload?.puuids ?? [];
+  };
+
+  const onReplayAnalysisUpdated = () => {
+    void loadReplayAnalyses(params.id, false).catch(() => undefined);
   };
 
   const updateBalance = async () => {
@@ -123,6 +136,7 @@
     fetchAllData();
     socketStore.initialize();
     socketStore.on("custom_config/viewers", onViewersChanged);
+    socketStore.on("custom_config/replay_analysis_updated", onReplayAnalysisUpdated);
     unsubscribeSocket = socketStore.subscribe((value) => {
       socketConnected = value?.connected;
       if (value?.connected) {
@@ -136,6 +150,7 @@
 
   onDestroy(() => {
     socketStore.off("custom_config/viewers", onViewersChanged);
+    socketStore.off("custom_config/replay_analysis_updated", onReplayAnalysisUpdated);
     unsubscribeSocket();
     socketStore.disconnect();
   });
@@ -150,7 +165,10 @@
 
 {#if replayFileDragging}
   <div class="replay-page-drop-overlay">
-    <div><strong>내전 리플레이 분석</strong><span>ROFL 파일을 놓아 업로드하세요.</span></div>
+    <div>
+      <strong>내전 리플레이 분석</strong>
+      <span>{canManage ? "ROFL 파일을 놓아 업로드하세요." : "리플레이 업로드는 방장만 할 수 있습니다."}</span>
+    </div>
   </div>
 {/if}
 <svelte:head>

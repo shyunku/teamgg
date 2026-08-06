@@ -263,6 +263,31 @@ export const getCustomGameConfigurationInfo = async (id) => {
   return response.data;
 };
 
+export const createCustomGameReplayAnalysisReq = async (customGameId, fileName, fileSize) => {
+  const response = await instance.post(`/platform/custom-game/replay-analysis`, {
+    customGameId,
+    fileName,
+    fileSize,
+  });
+  return response.data;
+};
+
+export const getCustomGameReplayAnalysesReq = async (customGameId) => {
+  const response = await instance.get(`/platform/custom-game/replay-analyses`, {
+    params: { customGameId },
+  });
+  return response.data;
+};
+
+export const getCustomGameReplayAnalysisReq = async (id) => {
+  const response = await instance.get(`/platform/custom-game/replay-analysis/${encodeURIComponent(id)}`);
+  return response.data;
+};
+
+export const deleteCustomGameReplayAnalysisReq = async (id) => {
+  await instance.delete(`/platform/custom-game/replay-analysis/${encodeURIComponent(id)}`);
+};
+
 export const updateCustomGameConfigurationName = async (id, name) => {
   const response = await instance.patch(`/platform/custom-game/name`, { id, name });
   return response.data;

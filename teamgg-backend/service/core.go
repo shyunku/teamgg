@@ -12,7 +12,6 @@ import (
 	"math/rand"
 	"net/http"
 	"team.gg-server/controllers/socket"
-	"team.gg-server/core"
 	"team.gg-server/libs/db"
 	"team.gg-server/models"
 	"team.gg-server/third_party/riot/api"
@@ -27,10 +26,6 @@ var ErrRiotIdentityNotFound = errors.New("riot identity not found")
 // holding a database transaction across Riot API calls. Each immutable match is
 // persisted by SaveDataExplorerMatch in its own short transaction.
 func RenewSummonerTotal(puuid string) error {
-	if core.DebugOnProd {
-		defer util.InspectFunctionExecutionTime()()
-	}
-
 	// update summoner info
 	summonerDAO, _, err := RenewSummonerInfoByPuuid(db.Root, puuid)
 	if err != nil {
@@ -225,9 +220,6 @@ func RenewSummonerMatchesIfNecessary(db db.Context, puuid string, matchIdList []
 	}
 
 	if len(uncachedMatchIds) > 0 {
-		timer := util.NewTimerWithName("summoner_match_renewal")
-		timer.Start()
-
 		promise := util.NewPromise[string, api.MatchDto]()
 		for _, matchId := range uncachedMatchIds {
 			promise.Add(fetchSummonerMatchesFromRiot, matchId)
@@ -242,10 +234,6 @@ func RenewSummonerMatchesIfNecessary(db db.Context, puuid string, matchIdList []
 			//log.Debugf("<- found match (%s) from riot", result.match.Metadata.MatchId)
 			uncachedMatches = append(uncachedMatches, *result.Result)
 		}
-
-		//if core.DebugOnProd {
-		//	log.Debugf("Fetched %d uncached matches in %s", len(uncachedMatchIds), timer.GetDurationString())
-		//}
 
 		for _, match := range uncachedMatches {
 			if err := SaveDataExplorerMatch(match, []string{puuid}); err != nil {

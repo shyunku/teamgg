@@ -9,7 +9,6 @@ import (
 	"team.gg-server/libs/db"
 	"team.gg-server/models/mixed/statistics_models"
 	"team.gg-server/service"
-	"team.gg-server/util"
 	"time"
 )
 
@@ -98,8 +97,6 @@ func (msr *MasteryStatisticsRepository) collectCoordinatedScheduled(ctx context.
 
 func (msr *MasteryStatisticsRepository) collect(database db.Context) (*MasteryStatistics, error) {
 	log.Infof("Collecting %s statistics...", msr.key())
-	timer := util.NewTimerWithName("MasteryStatisticsRepository")
-	timer.Start()
 
 	// collect data
 	masteryMXDAOs, err := statistics_models.GetMasteryStatisticsMXDAOs(database)
@@ -161,7 +158,7 @@ func (msr *MasteryStatisticsRepository) collect(database db.Context) (*MasterySt
 		collected.MasteryGroups = append(collected.MasteryGroups, mastery)
 	}
 
-	log.Infof("%s statistics collected successfully in %s", msr.key(), timer.GetDurationString())
+	log.Infof("%s statistics collected successfully", msr.key())
 	return collected, nil
 }
 
