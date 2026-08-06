@@ -8,22 +8,22 @@
 
 ```powershell
 Copy-Item .env.compose.example .env.compose
-Copy-Item teamgg-backend/.env.docker.example teamgg-backend/.env.docker
-Copy-Item teamgg-lol-replay-analyzer/.env.docker.example teamgg-lol-replay-analyzer/.env.docker
+Copy-Item apps/backend/.env.docker.example apps/backend/.env.docker
+Copy-Item apps/lol-replay-analyzer/.env.docker.example apps/lol-replay-analyzer/.env.docker
 ```
 
 각 파일의 역할은 분리되어 있습니다.
 
 - `.env.compose`: 공개 포트와 bind address만 관리하며 애플리케이션 비밀값은 넣지 않음
-- `teamgg-backend/.env.docker`: DB, Redis, Riot, RSO, JWT, 백엔드 실행 설정
-- `teamgg-lol-replay-analyzer/.env.docker`: OpenAI, 업로드, decoder, 분석 서버 실행 설정
-- `teamgg-frontend/.env.dev`, `.env.production`: 기존 프론트 빌드 설정을 그대로 사용
+- `apps/backend/.env.docker`: DB, Redis, Riot, RSO, JWT, 백엔드 실행 설정
+- `apps/lol-replay-analyzer/.env.docker`: OpenAI, 업로드, decoder, 분석 서버 실행 설정
+- `apps/frontend/.env.dev`, `.env.production`: 기존 프론트 빌드 설정을 그대로 사용
 
 기존 프로젝트 `.env`를 그대로 사용하려면 `.env.compose`에서 경로만 바꿀 수도 있습니다.
 
 ```dotenv
-BACKEND_ENV_FILE=./teamgg-backend/.env
-ANALYZER_ENV_FILE=./teamgg-lol-replay-analyzer/.env
+BACKEND_ENV_FILE=./apps/backend/.env
+ANALYZER_ENV_FILE=./apps/lol-replay-analyzer/.env
 ```
 
 다음 값은 특히 중요합니다.
@@ -93,7 +93,7 @@ docker compose --env-file .env.compose up -d --build backend replay-analyzer
 프론트 운영 빌드는 기존대로 S3에 업로드합니다.
 
 ```powershell
-Set-Location teamgg-frontend
+Set-Location apps/frontend
 npm ci
 npm run build
 ```

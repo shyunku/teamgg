@@ -18,7 +18,7 @@ The backend API server for **team.gg**, a League of Legends service for custom-g
 ## Project Structure
 
 ```text
-teamgg-backend/
+apps/backend/
 ├── controllers/          # API handlers and route definitions
 │   ├── middlewares/      # Gin middleware, including authentication and logging
 │   ├── socket/           # Socket.IO handlers

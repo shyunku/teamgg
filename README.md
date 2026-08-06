@@ -5,9 +5,9 @@ League of Legends 전적, 내전 팀 구성, 통계 및 ROFL 리플레이 분석
 ## 구조
 
 ```text
-teamgg-frontend/             Svelte 웹 클라이언트
-teamgg-backend/              Go API 서버
-teamgg-lol-replay-analyzer/  Node.js/TypeScript ROFL 분석 서버
+apps/frontend/             Svelte 웹 클라이언트
+apps/backend/              Go API 서버
+apps/lol-replay-analyzer/  Node.js/TypeScript ROFL 분석 서버
 ```
 
 ## 개발 실행
@@ -16,8 +16,8 @@ teamgg-lol-replay-analyzer/  Node.js/TypeScript ROFL 분석 서버
 
 ```powershell
 Copy-Item .env.compose.example .env.compose
-Copy-Item teamgg-backend/.env.docker.example teamgg-backend/.env.docker
-Copy-Item teamgg-lol-replay-analyzer/.env.docker.example teamgg-lol-replay-analyzer/.env.docker
+Copy-Item apps/backend/.env.docker.example apps/backend/.env.docker
+Copy-Item apps/lol-replay-analyzer/.env.docker.example apps/lol-replay-analyzer/.env.docker
 docker compose --env-file .env.compose --profile development up --build
 ```
 
