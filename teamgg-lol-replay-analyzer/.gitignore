@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+.work/
+uploads/
+decoded/
+.rofl-cache/
+output.log
+*.rofl
+test/*.prompt.json
+test/*.ai-result.md
+test/*.refined-result.md
+*.tmp
+coverage/
