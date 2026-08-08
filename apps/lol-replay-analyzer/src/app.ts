@@ -10,8 +10,8 @@ import { ReplayAnalysisService } from "./service/replay-analysis-service.js";
 import { saveReplayUpload } from "./http/upload.js";
 import { initializeSse, writeSse } from "./http/sse.js";
 import { TeamggJobReporter, validateUploadTicket } from "./integration/teamgg.js";
+import { buildLoggerOptions, createAnalysisProgressLogger, SERVICE_VERSION, type AnalysisLogContext } from "./logging.js";
 
-const VERSION = "0.1.0";
 const optionsSchema = z.object({ language: z.string().trim().min(2).max(40).default("Korean"), focusPlayer: z.string().trim().min(1).max(100).optional(), keepArtifacts: z.enum(["true", "false", "1", "0"]).optional() });
 function requestOptions(query: unknown) {
   const parsed = optionsSchema.safeParse(query);
@@ -30,26 +30,42 @@ export function resolveCorsOrigin(origin: string | undefined, allowedOrigins: st
   return allowedOrigins.includes(origin) ? origin : undefined;
 }
 export async function buildApp(config: AppConfig, analyzer?: ReplayAnalyzer): Promise<FastifyInstance> {
-  const app = Fastify({ logger: { level: config.logLevel }, bodyLimit: config.maxUploadBytes }); const selectedAnalyzer = analyzer ?? configuredAnalyzer(config); const service = new ReplayAnalysisService(config, selectedAnalyzer);
+  const app = Fastify({ logger: buildLoggerOptions(config), bodyLimit: config.maxUploadBytes }); const selectedAnalyzer = analyzer ?? configuredAnalyzer(config); const service = new ReplayAnalysisService(config, selectedAnalyzer);
   await app.register(cors, {
     origin: config.corsOrigins.length === 0 ? false : config.corsOrigins,
     methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Accept", "Content-Type", "X-Replay-Upload-Ticket"],
   });
   await app.register(multipart, { limits: { files: 1, fields: 4, fileSize: config.maxUploadBytes } });
-  app.get("/health", async () => ({ status: "ok", version: VERSION, isProduction: config.nodeEnv === "production", ai: { configured: Boolean(selectedAnalyzer), model: selectedAnalyzer?.model ?? null }, analysis: service.status }));
+  app.get("/health", async () => ({ status: "ok", version: SERVICE_VERSION, isProduction: config.nodeEnv === "production", ai: { configured: Boolean(selectedAnalyzer), model: selectedAnalyzer?.model ?? null }, analysis: service.status }));
   app.post("/v1/replays/analyze", async (request, reply) => {
     const { analysisOptions, retainArtifacts } = requestOptions(request.query); const upload = await saveReplayUpload(request, config); const lifecycle = requestController(request, config.analysisTimeoutMs);
-    request.log.info({ requestId: upload.requestId, fileName: upload.fileName }, "replay analysis started");
-    try { const result = await service.analyze(upload, analysisOptions, lifecycle.signal, (progress) => request.log.info({ requestId: upload.requestId, ...progress }, "replay analysis progress"), undefined, { retainArtifacts }); return await reply.send(result); } finally { lifecycle.dispose(); }
+    const logContext: AnalysisLogContext = { analysisId: upload.requestId, fileName: upload.fileName, mode: "direct", startedAt: Date.now() };
+    const logProgress = createAnalysisProgressLogger(request, logContext);
+    request.log.info({ event: "replay.analysis.started", ...logContext, retainArtifacts }, "replay analysis started");
+    try {
+      const result = await service.analyze(upload, analysisOptions, lifecycle.signal, logProgress, undefined, { retainArtifacts });
+      request.log.info({ event: "replay.analysis.completed", ...logContext, durationMs: Date.now() - logContext.startedAt, model: result.model, artifactsRetained: Boolean(result.retainedArtifacts) }, "replay analysis completed");
+      return await reply.send(result);
+    } catch (error) {
+      request.log.error({ err: error, event: "replay.analysis.failed", ...logContext, durationMs: Date.now() - logContext.startedAt }, "replay analysis failed");
+      throw error;
+    } finally { lifecycle.dispose(); }
   });
   app.post("/v1/replays/analyze/stream", async (request, reply) => {
     const { analysisOptions, retainArtifacts } = requestOptions(request.query); const upload = await saveReplayUpload(request, config); const lifecycle = requestController(request, config.analysisTimeoutMs);
+    const logContext: AnalysisLogContext = { analysisId: upload.requestId, fileName: upload.fileName, mode: "stream", startedAt: Date.now() };
+    const logProgress = createAnalysisProgressLogger(request, logContext);
+    request.log.info({ event: "replay.analysis.started", ...logContext, retainArtifacts }, "streaming replay analysis started");
     const allowOrigin = resolveCorsOrigin(request.headers.origin, config.corsOrigins);
     reply.hijack(); initializeSse(reply.raw, allowOrigin); writeSse(reply.raw, "started", { requestId: upload.requestId, fileName: upload.fileName });
     const keepAlive = setInterval(() => { if (!reply.raw.destroyed && !reply.raw.writableEnded) reply.raw.write(": keep-alive\n\n"); }, 15_000); keepAlive.unref();
-    try { const result = await service.analyze(upload, analysisOptions, lifecycle.signal, (progress) => writeSse(reply.raw, "progress", progress), (delta) => writeSse(reply.raw, "analysis_delta", { delta }), { retainArtifacts }); writeSse(reply.raw, "result", result); }
-    catch (error) { request.log.error({ err: error, requestId: upload.requestId }, "streaming replay analysis failed"); writeSse(reply.raw, "error", { code: error instanceof HttpError ? error.code : "ANALYSIS_FAILED", message: errorMessage(error) }); }
+    try {
+      const result = await service.analyze(upload, analysisOptions, lifecycle.signal, (progress) => { logProgress(progress); writeSse(reply.raw, "progress", progress); }, (delta) => writeSse(reply.raw, "analysis_delta", { delta }), { retainArtifacts });
+      request.log.info({ event: "replay.analysis.completed", ...logContext, durationMs: Date.now() - logContext.startedAt, model: result.model, artifactsRetained: Boolean(result.retainedArtifacts) }, "streaming replay analysis completed");
+      writeSse(reply.raw, "result", result);
+    }
+    catch (error) { request.log.error({ err: error, event: "replay.analysis.failed", ...logContext, durationMs: Date.now() - logContext.startedAt }, "streaming replay analysis failed"); writeSse(reply.raw, "error", { code: error instanceof HttpError ? error.code : "ANALYSIS_FAILED", message: errorMessage(error) }); }
     finally { clearInterval(keepAlive); lifecycle.dispose(); if (!reply.raw.writableEnded) reply.raw.end(); }
   });
   app.post<{ Params: { jobId: string }; Querystring: { ticket?: string; language?: string; focusPlayer?: string; keepArtifacts?: string } }>("/v1/replays/jobs/:jobId/upload/stream", async (request, reply) => {
@@ -86,16 +102,20 @@ export async function buildApp(config: AppConfig, analyzer?: ReplayAnalyzer): Pr
       await reporter.failed(error).catch((callbackError) => request.log.error({ err: callbackError }, "replay failure callback failed"));
       throw error;
     }
+    const logContext: AnalysisLogContext = { analysisId: upload.requestId, fileName: upload.fileName, mode: "shared-stream", startedAt: Date.now(), jobId: request.params.jobId };
+    const logProgress = createAnalysisProgressLogger(request, logContext);
+    request.log.info({ event: "replay.analysis.started", ...logContext, retainArtifacts }, "shared streaming replay analysis started");
     const lifecycle = requestController(request, config.analysisTimeoutMs);
     const allowOrigin = resolveCorsOrigin(request.headers.origin, config.corsOrigins);
     reply.hijack(); initializeSse(reply.raw, allowOrigin); writeSse(reply.raw, "started", { requestId: upload.requestId, fileName: upload.fileName, jobId: request.params.jobId });
     const keepAlive = setInterval(() => { if (!reply.raw.destroyed && !reply.raw.writableEnded) reply.raw.write(": keep-alive\n\n"); }, 15_000); keepAlive.unref();
     try {
-      const result = await service.analyze(upload, analysisOptions, lifecycle.signal, (progress) => { reporter.progress(progress); writeSse(reply.raw, "progress", progress); }, (delta) => writeSse(reply.raw, "analysis_delta", { delta }), { retainArtifacts });
+      const result = await service.analyze(upload, analysisOptions, lifecycle.signal, (progress) => { logProgress(progress); reporter.progress(progress); writeSse(reply.raw, "progress", progress); }, (delta) => writeSse(reply.raw, "analysis_delta", { delta }), { retainArtifacts });
       await reporter.completed(result);
+      request.log.info({ event: "replay.analysis.completed", ...logContext, durationMs: Date.now() - logContext.startedAt, model: result.model, artifactsRetained: Boolean(result.retainedArtifacts) }, "shared streaming replay analysis completed");
       writeSse(reply.raw, "result", { ...result, jobId: request.params.jobId });
     } catch (error) {
-      request.log.error({ err: error, requestId: upload.requestId, jobId: request.params.jobId }, "shared streaming replay analysis failed");
+      request.log.error({ err: error, event: "replay.analysis.failed", ...logContext, durationMs: Date.now() - logContext.startedAt }, "shared streaming replay analysis failed");
       await reporter.failed(error).catch((callbackError) => request.log.error({ err: callbackError }, "replay failure callback failed"));
       writeSse(reply.raw, "error", { code: error instanceof HttpError ? error.code : "ANALYSIS_FAILED", message: errorMessage(error) });
     } finally {

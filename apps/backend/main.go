@@ -46,10 +46,10 @@ func main() {
 	if pathErr != nil {
 		environmentPath = ".env"
 	}
-	log.Infof("Loading environment file: %s", environmentPath)
+	log.Infof("Looking for optional local environment file: %s", environmentPath)
 	if err := godotenv.Load(environmentPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			log.Info("Environment file not found; using process environment variables")
+			log.Info("Optional local environment file not found; continuing with process environment variables (expected with Docker Compose env_file)")
 		} else {
 			log.Error(err)
 			os.Exit(-1)

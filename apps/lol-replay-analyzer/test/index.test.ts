@@ -12,6 +12,7 @@ import { buildCandidates, calculateGoldSwing, objectiveImpact } from "../src/rof
 import { normalizeAnalysisProgress } from "../src/service/replay-analysis-service.js";
 import { initializeSse } from "../src/http/sse.js";
 import { TeamggJobReporter, validateUploadTicket } from "../src/integration/teamgg.js";
+import { buildLoggerOptions, createAnalysisProgressLogger } from "../src/logging.js";
 
 function syntheticRofl(): Buffer {
   const header = Buffer.alloc(32);
@@ -78,6 +79,41 @@ test("health endpoint works without an AI key", async () => {
   } finally {
     await app.close();
   }
+});
+
+test("logger options include ISO timestamps and service context", () => {
+  const options = buildLoggerOptions({ logLevel: "debug", nodeEnv: "production" });
+  assert.equal(options.level, "debug");
+  assert.equal(options.base.service, "teamgg-lol-replay-analyzer");
+  assert.equal(options.base.environment, "production");
+  assert.match(options.timestamp(), /^,"timestamp":"\d{4}-\d{2}-\d{2}T.*Z"$/);
+});
+
+test("analysis progress logging reports stage changes and five-percent increments", () => {
+  const entries: Array<Record<string, unknown>> = [];
+  const request = {
+    log: {
+      info(fields: Record<string, unknown>) {
+        entries.push(fields);
+      },
+    },
+  };
+  const logProgress = createAnalysisProgressLogger(request as never, {
+    analysisId: "analysis-1",
+    fileName: "test.rofl",
+    mode: "stream",
+    startedAt: Date.now(),
+  });
+
+  logProgress({ stage: "replay-decoding", message: "decoding", progress: 0.01 });
+  logProgress({ stage: "replay-decoding", message: "decoding", progress: 0.03 });
+  logProgress({ stage: "replay-decoding", message: "decoding", progress: 0.06 });
+  logProgress({ stage: "digest-building", message: "digest", progress: 0.72 });
+  logProgress({ stage: "complete", message: "complete", progress: 1 });
+
+  assert.equal(entries.length, 4);
+  assert.deepEqual(entries.map((entry) => entry.progressPercent), [1, 6, 72, 100]);
+  assert.ok(entries.every((entry) => entry.event === "replay.analysis.progress"));
 });
 
 test("streaming responses only expose configured CORS origins", () => {

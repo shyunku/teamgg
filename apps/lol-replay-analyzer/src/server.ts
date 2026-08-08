@@ -9,6 +9,24 @@ await Promise.all([
 ]);
 
 const app = await buildApp(config);
+app.log.info(
+  {
+    event: "service.configured",
+    host: config.host,
+    port: config.port,
+    logLevel: config.logLevel,
+    maxUploadBytes: config.maxUploadBytes,
+    maxConcurrentAnalyses: config.maxConcurrentAnalyses,
+    analysisTimeoutMs: config.analysisTimeoutMs,
+    workDirectory: config.workDirectory,
+    roflCacheDirectory: config.roflCacheDirectory,
+    keepArtifacts: config.keepArtifacts,
+    aiConfigured: Boolean(config.openaiApiKey && config.openaiModel),
+    model: config.openaiModel ?? null,
+    teamggIntegrationConfigured: Boolean(config.teamggApiBaseUrl && config.replayAnalyzerSharedSecret),
+  },
+  "replay analyzer configured",
+);
 const close = async (signal: string) => {
   app.log.info({ signal }, "shutting down");
   await app.close();

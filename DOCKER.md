@@ -118,3 +118,11 @@ docker compose --profile development down
 ```
 
 The `backend_datafiles` volume stores Data Dragon files and statistics caches. `replay_decoder_cache` stores League executables and decoder artifacts. `replay_work` stores large uploads and decoded files while an analysis is running; the application removes them after successful or failed completion. Use `docker compose down -v` only when you intentionally want to delete these persistent data and cache volumes.
+
+These are Docker named volumes, not host bind mounts. For example, `/app/datafiles` exists inside the backend container. To find its actual storage directory on a Linux Docker host, run:
+
+```bash
+docker volume inspect teamgg_backend_datafiles
+```
+
+Read the `Mountpoint` field; rootful Docker commonly stores it under `/var/lib/docker/volumes/teamgg_backend_datafiles/_data`.

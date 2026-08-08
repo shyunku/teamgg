@@ -39,6 +39,9 @@ func CheckEnvironmentVariables(checkKeys []string) error {
 }
 
 func GetProjectRootDirectory() string {
+	if configuredRoot := strings.TrimSpace(os.Getenv("APP_PROJECT_ROOT")); configuredRoot != "" {
+		return filepath.Clean(configuredRoot)
+	}
 	_, b, _, _ := runtime.Caller(0)
 	return filepath.Dir(filepath.Dir(b))
 }

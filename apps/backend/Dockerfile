@@ -22,7 +22,8 @@ RUN mkdir -p /app/datafiles \
     && chown -R teamgg:teamgg /app
 
 USER teamgg
-ENV APP_SERVER_PORT=7713
+ENV APP_SERVER_PORT=7713 \
+    APP_PROJECT_ROOT=/app
 
 VOLUME ["/app/datafiles"]
 EXPOSE 7713
