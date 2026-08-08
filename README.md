@@ -15,10 +15,10 @@ apps/lol-replay-analyzer/  Node.js/TypeScript ROFL analysis server
 Create the environment files for each service, then start all three services with Docker Compose.
 
 ```powershell
-Copy-Item .env.compose.example .env.compose
-Copy-Item apps/backend/.env.docker.example apps/backend/.env
-Copy-Item apps/lol-replay-analyzer/.env.docker.example apps/lol-replay-analyzer/.env
-docker compose --env-file .env.compose --profile development up --build
+Copy-Item .env.example .env
+Copy-Item apps/backend/.env.docker.example apps/backend/.env.docker
+Copy-Item apps/lol-replay-analyzer/.env.docker.example apps/lol-replay-analyzer/.env.docker
+docker compose --profile development up --build
 ```
 
 See [DOCKER.md](./DOCKER.md) for detailed Docker and deployment instructions.
@@ -28,5 +28,5 @@ See [DOCKER.md](./DOCKER.md) for detailed Docker and deployment instructions.
 When the frontend is hosted on Amazon S3, start only the backend and replay analyzer services.
 
 ```powershell
-docker compose --env-file .env.compose up -d --build backend replay-analyzer
+docker compose up -d --build backend replay-analyzer
 ```

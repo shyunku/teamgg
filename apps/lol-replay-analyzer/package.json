@@ -13,7 +13,8 @@
     "start": "node dist/src/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test test/index.test.ts",
-    "analyze:rofl": "tsx src/cli.ts"
+    "analyze:rofl": "tsx src/cli.ts",
+    "generate:secret": "node scripts/generate-secret.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.1",

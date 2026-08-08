@@ -1,8 +1,10 @@
-.env.compose
-
 apps/backend/.env
 apps/lol-replay-analyzer/.env
 
 .idea/
 .vscode/
 *.log
+
+.env
+.env.*
+!.env*.example*
