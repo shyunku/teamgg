@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	log "github.com/shyunku-libraries/go-logger"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -23,6 +24,8 @@ const (
 
 	participantDiscoveryDisabled = "disabled"
 	participantDiscoveryBounded  = "bounded"
+	minExplorerMetricsInterval   = time.Minute
+	minExplorerTempStatusSamples = 10
 	maxSupportedExplorerDepth    = 10
 	maxExplorerCleanupBatch      = 5000
 	minExplorerCleanupInterval   = 5 * time.Second
@@ -31,28 +34,41 @@ const (
 )
 
 type DataExplorer struct {
-	leaseDuration        time.Duration
-	pollInterval         time.Duration
-	bootstrapInterval    time.Duration
-	bootstrapBatchSize   int
-	summonerWorkers      int
-	matchWorkers         int
-	maxAttempts          int
-	dailySummonerBudget  int
-	dailyMatchBudget     int
-	recentMatchCount     int
-	maxDepth             int
-	participantDiscovery string
-	bootstrapEnabled     bool
-	cleanupEnabled       bool
-	cleanupInterval      time.Duration
-	cleanupBatchSize     int
-	completedRetention   time.Duration
-	sourceRetention      time.Duration
-	summonerRevisit      time.Duration
-	matchRevisit         time.Duration
-	debugEnabled         bool
-	statusLogInterval    time.Duration
+	leaseDuration         time.Duration
+	pollInterval          time.Duration
+	bootstrapInterval     time.Duration
+	bootstrapBatchSize    int
+	summonerWorkers       int
+	matchWorkers          int
+	maxAttempts           int
+	dailySummonerBudget   int
+	dailyMatchBudget      int
+	recentMatchCount      int
+	maxDepth              int
+	participantDiscovery  string
+	bootstrapEnabled      bool
+	cleanupEnabled        bool
+	cleanupInterval       time.Duration
+	cleanupBatchSize      int
+	completedRetention    time.Duration
+	sourceRetention       time.Duration
+	summonerRevisit       time.Duration
+	matchRevisit          time.Duration
+	metricsEnabled        bool
+	metricsInterval       time.Duration
+	alertBudgetPercent    int64
+	alertSummonerQueue    int64
+	alertMatchQueue       int64
+	alertFailedJobs       int64
+	alertDatabaseBytes    int64
+	alertDailyRowGrowth   int64
+	alertTempDiskPercent  int64
+	previousTempTables    int64
+	previousTempDisk      int64
+	tempStatusInitialized bool
+	metricAlertStates     map[string]bool
+	debugEnabled          bool
+	statusLogInterval     time.Duration
 
 	explored atomic.Int64
 	success  atomic.Int64
@@ -81,6 +97,16 @@ func NewDataExplorer() *DataExplorer {
 		sourceRetention:      explorerEnvDurationMin("DATA_EXPLORER_SOURCE_RETENTION", 24*time.Hour, minExplorerRetention),
 		summonerRevisit:      explorerEnvDurationMin("DATA_EXPLORER_SUMMONER_REVISIT_INTERVAL", 30*24*time.Hour, minExplorerRevisit),
 		matchRevisit:         explorerEnvDurationMin("DATA_EXPLORER_MATCH_REVISIT_INTERVAL", 365*24*time.Hour, minExplorerRevisit),
+		metricsEnabled:       explorerEnvBool("DATA_EXPLORER_METRICS_ENABLED", true),
+		metricsInterval:      explorerEnvDurationMin("DATA_EXPLORER_METRICS_INTERVAL", 5*time.Minute, minExplorerMetricsInterval),
+		alertBudgetPercent:   explorerEnvPercent("DATA_EXPLORER_ALERT_BUDGET_PERCENT", 80),
+		alertSummonerQueue:   explorerEnvInt64("DATA_EXPLORER_ALERT_SUMMONER_QUEUE", 10000),
+		alertMatchQueue:      explorerEnvInt64("DATA_EXPLORER_ALERT_MATCH_QUEUE", 10000),
+		alertFailedJobs:      explorerEnvInt64("DATA_EXPLORER_ALERT_FAILED_JOBS", 100),
+		alertDatabaseBytes:   explorerEnvBytes("DATA_EXPLORER_ALERT_DATABASE_BYTES", 0),
+		alertDailyRowGrowth:  explorerEnvInt64("DATA_EXPLORER_ALERT_DAILY_ROW_GROWTH", 1000000),
+		alertTempDiskPercent: explorerEnvPercent("DATA_EXPLORER_ALERT_TEMP_DISK_PERCENT", 25),
+		metricAlertStates:    make(map[string]bool),
 		debugEnabled:         explorerEnvBool("DATA_EXPLORER_DEBUG", core.DebugMode),
 		statusLogInterval:    explorerEnvDuration("DATA_EXPLORER_STATUS_LOG_INTERVAL", 30*time.Second),
 	}
@@ -125,6 +151,67 @@ func explorerEnvInt(key string, fallback int) int {
 	return value
 }
 
+func explorerEnvInt64(key string, fallback int64) int64 {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed < 0 {
+		return fallback
+	}
+	return parsed
+}
+
+func explorerEnvBytes(key string, fallback int64) int64 {
+	value := strings.ToUpper(strings.TrimSpace(os.Getenv(key)))
+	if value == "" {
+		return fallback
+	}
+
+	unit := ""
+	for _, candidate := range []string{"TB", "GB", "MB", "KB", "T", "G", "M", "K", "B"} {
+		if strings.HasSuffix(value, candidate) {
+			unit = candidate
+			value = strings.TrimSpace(strings.TrimSuffix(value, candidate))
+			break
+		}
+	}
+	if unit == "" {
+		parsed, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || parsed < 0 {
+			return fallback
+		}
+		return parsed
+	}
+
+	multiplier := float64(1)
+	switch unit {
+	case "K", "KB":
+		multiplier = 1 << 10
+	case "M", "MB":
+		multiplier = 1 << 20
+	case "G", "GB":
+		multiplier = 1 << 30
+	case "T", "TB":
+		multiplier = 1 << 40
+	}
+
+	parsed, err := strconv.ParseFloat(value, 64)
+	bytes := parsed * multiplier
+	if err != nil || parsed < 0 || math.IsNaN(bytes) || math.IsInf(bytes, 0) || bytes >= float64(math.MaxInt64) {
+		return fallback
+	}
+	return int64(bytes)
+}
+
+func explorerEnvPercent(key string, fallback int64) int64 {
+	value := explorerEnvInt64(key, fallback)
+	if value > 100 {
+		return 100
+	}
+	return value
+}
 func explorerEnvDuration(key string, fallback time.Duration) time.Duration {
 	value := strings.TrimSpace(os.Getenv(key))
 	if value == "" {
@@ -166,6 +253,12 @@ func (de *DataExplorer) Loop() {
 		de.cleanupEnabled, de.cleanupInterval, de.cleanupBatchSize,
 		de.completedRetention, de.sourceRetention,
 	)
+	log.Infof(
+		"event=data_explorer_metrics_config enabled=%t interval=%s alert_budget_percent=%d alert_summoner_queue=%d alert_match_queue=%d alert_failed_jobs=%d alert_database_bytes=%d alert_daily_row_growth=%d alert_temp_disk_percent=%d",
+		de.metricsEnabled, de.metricsInterval, de.alertBudgetPercent,
+		de.alertSummonerQueue, de.alertMatchQueue, de.alertFailedJobs,
+		de.alertDatabaseBytes, de.alertDailyRowGrowth, de.alertTempDiskPercent,
+	)
 
 	var workers sync.WaitGroup
 	if err := models.RecoverExpiredDataExplorerJobs(db.Root); err != nil {
@@ -183,6 +276,16 @@ func (de *DataExplorer) Loop() {
 			workers.Done()
 		}()
 	}
+	if de.metricsEnabled {
+		workers.Add(1)
+		go func() {
+			de.metricsWorker()
+			workers.Done()
+		}()
+	} else {
+		log.Info("event=data_explorer_metrics_config enabled=false")
+	}
+
 	if de.bootstrapEnabled {
 		workers.Add(1)
 		go func() {
@@ -290,6 +393,155 @@ func (de *DataExplorer) logStatus() {
 	)
 }
 
+type dataExplorerMetricCheck struct {
+	name      string
+	value     int64
+	threshold int64
+	available bool
+}
+
+func (de *DataExplorer) metricsWorker() {
+	de.logOperationalMetrics()
+	ticker := time.NewTicker(de.metricsInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		de.logOperationalMetrics()
+	}
+}
+
+func (de *DataExplorer) logOperationalMetrics() {
+	diagnostics, err := models.GetDataExplorerDiagnostics(db.Root)
+	if err != nil {
+		log.Errorf("event=data_explorer_metrics result=failed stage=diagnostics error=%v", err)
+		return
+	}
+	queueRows := explorerJobTotal(diagnostics.SummonerJobs) + explorerJobTotal(diagnostics.MatchJobs)
+	metrics, err := models.CollectDataExplorerOperationalMetrics(db.Root, queueRows)
+	if err != nil {
+		log.Errorf("event=data_explorer_metrics result=failed stage=collection error=%v", err)
+		return
+	}
+
+	tempTablesDelta, tempDiskDelta, tempIntervalAvailable := de.tempStatusInterval(metrics)
+	tempDiskPercent := int64(-1)
+	if tempIntervalAvailable && tempTablesDelta > 0 {
+		tempDiskPercent = tempDiskDelta * 100 / tempTablesDelta
+	}
+	log.Infof(
+		"event=data_explorer_metrics result=ok metric_date=%s interval=%s summoner_usage=%d summoner_budget=%d match_usage=%d match_budget=%d summoner_pending=%d summoner_processing=%d summoner_failed=%d match_pending=%d match_processing=%d match_failed=%d summoner_rows_estimated=%d match_rows_estimated=%d mastery_rows_estimated=%d queue_rows=%d daily_summoner_growth_estimated=%d daily_match_growth_estimated=%d daily_mastery_growth_estimated=%d daily_queue_growth=%d database_bytes=%d database_reclaimable_bytes=%d temp_tables_delta=%d temp_disk_tables_delta=%d temp_disk_percent=%d temp_status_available=%t temp_allocated_bytes=%d temp_free_bytes=%d temp_space_available=%t",
+		metrics.MetricDate.Format("2006-01-02"), de.metricsInterval,
+		diagnostics.DailyUsage[explorerSummonerBudgetKind], de.dailySummonerBudget,
+		diagnostics.DailyUsage[explorerMatchBudgetKind], de.dailyMatchBudget,
+		diagnostics.SummonerJobs[models.DataExplorerJobPending],
+		diagnostics.SummonerJobs[models.DataExplorerJobProcessing],
+		diagnostics.SummonerJobs[models.DataExplorerJobFailed],
+		diagnostics.MatchJobs[models.DataExplorerJobPending],
+		diagnostics.MatchJobs[models.DataExplorerJobProcessing],
+		diagnostics.MatchJobs[models.DataExplorerJobFailed],
+		metrics.SummonerRows, metrics.MatchRows, metrics.MasteryRows, metrics.QueueRows,
+		metrics.DailySummonerRowGrowth, metrics.DailyMatchRowGrowth,
+		metrics.DailyMasteryRowGrowth, metrics.DailyQueueRowGrowth,
+		metrics.DatabaseBytes, metrics.DatabaseFreeBytes,
+		tempTablesDelta, tempDiskDelta, tempDiskPercent, tempIntervalAvailable,
+		metrics.TempAllocatedBytes, metrics.TempFreeBytes, metrics.TempSpaceAvailable,
+	)
+
+	de.updateMetricAlerts(de.metricChecks(
+		diagnostics,
+		metrics,
+		tempTablesDelta,
+		tempDiskDelta,
+		tempIntervalAvailable,
+	))
+}
+
+func explorerJobTotal(counts map[string]int64) int64 {
+	return counts[models.DataExplorerJobPending] +
+		counts[models.DataExplorerJobProcessing] +
+		counts[models.DataExplorerJobDone] +
+		counts[models.DataExplorerJobFailed]
+}
+
+func (de *DataExplorer) tempStatusInterval(metrics *models.DataExplorerOperationalMetrics) (int64, int64, bool) {
+	if !metrics.TempStatusAvailable {
+		return -1, -1, false
+	}
+	if !de.tempStatusInitialized {
+		de.previousTempTables = metrics.CreatedTempTables
+		de.previousTempDisk = metrics.CreatedTempDiskTables
+		de.tempStatusInitialized = true
+		return -1, -1, false
+	}
+	tables := metrics.CreatedTempTables - de.previousTempTables
+	disk := metrics.CreatedTempDiskTables - de.previousTempDisk
+	de.previousTempTables = metrics.CreatedTempTables
+	de.previousTempDisk = metrics.CreatedTempDiskTables
+	if tables < 0 || disk < 0 {
+		return -1, -1, false
+	}
+	return tables, disk, true
+}
+
+func (de *DataExplorer) metricChecks(
+	diagnostics *models.DataExplorerDiagnostics,
+	metrics *models.DataExplorerOperationalMetrics,
+	tempTablesDelta int64,
+	tempDiskDelta int64,
+	tempIntervalAvailable bool,
+) []dataExplorerMetricCheck {
+	checks := []dataExplorerMetricCheck{
+		{name: "summoner_queue_pending", value: diagnostics.SummonerJobs[models.DataExplorerJobPending], threshold: de.alertSummonerQueue, available: true},
+		{name: "match_queue_pending", value: diagnostics.MatchJobs[models.DataExplorerJobPending], threshold: de.alertMatchQueue, available: true},
+		{name: "failed_jobs", value: diagnostics.SummonerJobs[models.DataExplorerJobFailed] + diagnostics.MatchJobs[models.DataExplorerJobFailed], threshold: de.alertFailedJobs, available: true},
+		{name: "database_bytes", value: metrics.DatabaseBytes, threshold: de.alertDatabaseBytes, available: true},
+		{name: "daily_summoner_growth_estimated", value: metrics.DailySummonerRowGrowth, threshold: de.alertDailyRowGrowth, available: true},
+		{name: "daily_match_growth_estimated", value: metrics.DailyMatchRowGrowth, threshold: de.alertDailyRowGrowth, available: true},
+		{name: "daily_mastery_growth_estimated", value: metrics.DailyMasteryRowGrowth, threshold: de.alertDailyRowGrowth, available: true},
+		{name: "daily_queue_growth", value: metrics.DailyQueueRowGrowth, threshold: de.alertDailyRowGrowth, available: true},
+	}
+	if de.dailySummonerBudget > 0 {
+		checks = append(checks, dataExplorerMetricCheck{
+			name: "summoner_budget_percent", value: diagnostics.DailyUsage[explorerSummonerBudgetKind] * 100 / int64(de.dailySummonerBudget),
+			threshold: de.alertBudgetPercent, available: true,
+		})
+	}
+	if de.dailyMatchBudget > 0 {
+		checks = append(checks, dataExplorerMetricCheck{
+			name: "match_budget_percent", value: diagnostics.DailyUsage[explorerMatchBudgetKind] * 100 / int64(de.dailyMatchBudget),
+			threshold: de.alertBudgetPercent, available: true,
+		})
+	}
+	if tempIntervalAvailable && tempTablesDelta >= minExplorerTempStatusSamples {
+		checks = append(checks, dataExplorerMetricCheck{
+			name: "temp_disk_percent", value: tempDiskDelta * 100 / tempTablesDelta,
+			threshold: de.alertTempDiskPercent, available: true,
+		})
+	}
+	return checks
+}
+
+func (de *DataExplorer) updateMetricAlerts(checks []dataExplorerMetricCheck) {
+	for _, check := range checks {
+		if !check.available || check.threshold <= 0 {
+			continue
+		}
+		firing := check.value >= check.threshold
+		wasFiring := de.metricAlertStates[check.name]
+		switch {
+		case firing && !wasFiring:
+			log.Warnf(
+				"event=data_explorer_alert state=firing metric=%s value=%d threshold=%d",
+				check.name, check.value, check.threshold,
+			)
+		case !firing && wasFiring:
+			log.Infof(
+				"event=data_explorer_alert state=recovered metric=%s value=%d threshold=%d",
+				check.name, check.value, check.threshold,
+			)
+		}
+		de.metricAlertStates[check.name] = firing
+	}
+}
 func (de *DataExplorer) logJob(kind, id, result string, count int64) {
 	if !de.debugEnabled || (count > 10 && count%100 != 0) {
 		return

@@ -88,6 +88,16 @@ func migrationDefinitions() []Definition {
 			},
 			Validate: validateDataExplorerProcessingState,
 		},
+		{
+			Version:  "20260821_001",
+			FileName: "20260821_add_data_explorer_metrics.sql",
+			Apply: func(_ context.Context, database *sqlx.DB) error {
+				return models.EnsureDataExplorerMetricsSchema(database)
+			},
+			Validate: func(ctx context.Context, database *sqlx.DB) (bool, error) {
+				return tablesExist(ctx, database, "data_explorer_metrics_daily")
+			},
+		},
 	}
 }
 

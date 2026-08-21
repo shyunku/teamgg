@@ -46,7 +46,7 @@ func TestMigrationManifestIsOrderedAndChecksummed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(migrations) != 9 {
+	if len(migrations) != 10 {
 		t.Fatalf("unexpected migration count: %d", len(migrations))
 	}
 	seen := make(map[string]struct{}, len(migrations))

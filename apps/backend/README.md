@@ -105,6 +105,16 @@ DATA_EXPLORER_LEASE=5m
 DATA_EXPLORER_MAX_ATTEMPTS=8
 DATA_EXPLORER_DEBUG=false
 DATA_EXPLORER_STATUS_LOG_INTERVAL=30s
+DATA_EXPLORER_METRICS_ENABLED=true
+DATA_EXPLORER_METRICS_INTERVAL=5m
+DATA_EXPLORER_ALERT_BUDGET_PERCENT=80
+DATA_EXPLORER_ALERT_SUMMONER_QUEUE=10000
+DATA_EXPLORER_ALERT_MATCH_QUEUE=10000
+DATA_EXPLORER_ALERT_FAILED_JOBS=100
+DATA_EXPLORER_ALERT_DATABASE_BYTES=5G
+DATA_EXPLORER_ALERT_DAILY_ROW_GROWTH=1000000
+DATA_EXPLORER_ALERT_TEMP_DISK_PERCENT=25
+
 
 # Statistics snapshots (optional; each loop is disabled unless explicitly enabled)
 STATISTICS_TIER_ENABLED=true
@@ -133,6 +143,8 @@ Set a `DATA_EXPLORER_*_BUDGET` variable to `0` only when an uncapped daily budge
 Successful jobs persist `last_processed_at` and `next_eligible_at` in separate processing-state tables. Queue insertion checks this state, so removing completed queue rows does not immediately enqueue the same relationship graph again. The default revisit windows are 30 days for summoners and 365 days for immutable matches. Existing `done` jobs are copied to these tables through restart-safe primary-key cursors in the same small batch size; this state backfill runs even while deletion is disabled.
 
 Completed-job cleanup is disabled by default because it deletes database rows. After confirming the retention policy, set `DATA_EXPLORER_CLEANUP_ENABLED=true` to remove only `done` summoner/match jobs and completed match-source rows in batches. The default batch is 500 rows per table every 30 seconds, with 24-hour retention. Pending, processing, and failed jobs are never deleted by this cleanup. Safety bounds cap the batch at 5,000 rows, enforce a minimum five-second cleanup interval and one-hour retention, and prevent either revisit interval from being shorter than 24 hours.
+Operational metrics are emitted as parseable `key=value` logs independently of `DATA_EXPLORER_DEBUG`. See [DataExplorer operations](docs/data-explorer-operations.md) for metric semantics, alert thresholds, migration instructions, and a production budget-sizing procedure.
+
 
 Statistics timing values use Go duration syntax, such as `30s`, `5m`, and `12h`. Each statistics job uses a different initial delay so that database aggregation jobs do not all start at once during server startup. `STATISTICS_LOCK_RETRY_DELAY` controls the short retry interval used when another statistics job holds the lock, while `STATISTICS_RETRY_DELAY` controls retries after an actual collection error. When multiple server instances are running, MySQL advisory locks and the shared `statistics_snapshots` cache prevent duplicate aggregation work.
 
