@@ -373,12 +373,6 @@ func saveMatchToLocalDB(db db.Context, puuid string, match api.MatchDto) error {
 			return err
 		}
 
-		fromMatchId := matchId
-		if err := models.EnqueueDataExplorerSummonerJob(db, p.Puuid, -10, 1, &fromMatchId); err != nil {
-			logMatchPersistenceError(err)
-			return err
-		}
-
 		// insert new match participant detail
 		matchParticipantDetailEntity := models.MatchParticipantDetailDAO{
 			MatchParticipantId:             matchParticipantId,

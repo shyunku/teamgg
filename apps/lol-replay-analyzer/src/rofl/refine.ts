@@ -125,6 +125,27 @@ function eventTime(row: RecordValue): number | null {
   return Number.isFinite(time) ? Math.round(time * 1000) / 1000 : null;
 }
 
+export function extractHeroDeaths(
+  rows: RecordValue[],
+  playerByKey: ReadonlyMap<number, string>,
+): Array<{ t: number; victimId: string; killerId: string | null }> {
+  const mapped = (raw: unknown): string | undefined => {
+    const key = paramKey(raw);
+    return key === null ? undefined : playerByKey.get(key);
+  };
+
+  return rows.flatMap((row) => {
+    const t = eventTime(row);
+    const named = row.namedParameters as RecordValue | null;
+    // On patches with full semantic overlays, prefer the explicitly decoded
+    // victim. On 16.16 the hero-death packet's block param is the victim NetID;
+    // this is validated against every player's post-game death count below.
+    const victimId = mapped(named?.victimEntityNetId) ?? mapped(row.param);
+    const killerId = mapped(named?.killerNetId) ?? null;
+    return t === null || !victimId ? [] : [{ t, victimId, killerId }];
+  });
+}
+
 function sum(players: ReplayPlayer[], field: keyof ReplayPlayer): number {
   return players.reduce((total, player) => total + (typeof player[field] === "number" ? player[field] : 0), 0);
 }
@@ -159,7 +180,7 @@ export async function refineReplay(inspection: RoflInspection, decoded: DecodeDe
     packetRows(join(packetDir, "S2C_OnLeaveTeamVisibility_s.json")),
   ]);
   const toPlayer = (row: RecordValue) => { const key = paramKey(row.param); return key === null ? undefined : playerByKey.get(key); };
-  const kills = heroDeathRows.flatMap((row) => { const t = eventTime(row); const named = row.namedParameters as RecordValue | null; const victimKey = paramKey(named?.victimEntityNetId); const killerKey = paramKey(named?.killerNetId); const victimId = victimKey === null ? undefined : playerByKey.get(victimKey); const killerId = killerKey === null ? null : playerByKey.get(killerKey) ?? null; return t === null || !victimId ? [] : [{ t, victimId, killerId }]; });
+  const kills = extractHeroDeaths(heroDeathRows, playerByKey);
   const deathEvents = (kills.length > 0 ? kills.map(({ t, victimId }) => ({ t, playerId: victimId })) : deathRows.flatMap((row) => { const t = eventTime(row); const playerId = toPlayer(row); return t === null || !playerId ? [] : [{ t, playerId }]; }))
     .filter((event, index, events) => index === 0 || `${event.t}:${event.playerId}` !== `${events[index - 1]!.t}:${events[index - 1]!.playerId}`);
   const seenLevels = new Set<string>();
@@ -198,7 +219,7 @@ export async function refineReplay(inspection: RoflInspection, decoded: DecodeDe
     idScheme: { playerId: "p1..p10 are replay-local identifiers", paramHint: "lower 16 bits are matched; upper 0x100 changes map to the same player" },
     players,
     teams: compactRows(["team", "won", "kills", "deaths", "assists", "goldEarned", "visionScore", "championDamage"], [...new Set(players.map((p) => p.team).filter((team): team is number => team !== null))].sort().map((team) => { const members = players.filter((p) => p.team === team); return { team, won: members[0]?.won ?? null, kills: sum(members, "kills"), deaths: sum(members, "deaths"), assists: sum(members, "assists"), goldEarned: sum(members, "goldEarned"), visionScore: sum(members, "visionScore"), championDamage: sum(members, "totalDamageToChampions") }; })),
-    decoder: { compact: true, artifactReused: decoded.artifactReused, packetRows: Number(decoded.counts.packetDataCount ?? 0), packetFiles: Number(decoded.counts.packetFiles ?? 0) },
+    decoder: { compact: true, artifactReused: decoded.artifactReused, packetRows: Number(decoded.counts.packetDataCount ?? 0), packetFiles: Number(decoded.counts.packetFileCount ?? 0) },
   };
   const autoEntries = await autoRefinePackets(packetDir, join(packetRoot, "parsed"), playerByKey);
   const allObjectives = [...objectives, ...neutralObjectives].sort((a, b) => a.t - b.t);
@@ -207,7 +228,7 @@ export async function refineReplay(inspection: RoflInspection, decoded: DecodeDe
   await writeFile(join(packetRoot, "health.json"), `${JSON.stringify(compactRows(["t", "playerId", "health", "maxHealth", "healthPct", "change"], healthSnapshots), null, 2)}\n`, "utf8");
   await writeFile(join(packetRoot, "objectives.json"), `${JSON.stringify(compactRows(["t", "type", "lane", "tier", "defendingTeamId", "killerId"], allObjectives), null, 2)}\n`, "utf8");
   await writeFile(join(packetRoot, "visibility.json"), `${JSON.stringify(compactRows(["t", "playerId", "state", "channel"], visibility), null, 2)}\n`, "utf8");
-  await writeFile(join(packetRoot, "gold-timeline.json"), `${JSON.stringify({ availability: "unavailable", reason: "parser 0.4.0 has no time-series gold/experience namedParameters", timeline: compactRows(["t", "team100", "team200", "diff"], goldTimeline) }, null, 2)}\n`, "utf8");
+  await writeFile(join(packetRoot, "gold-timeline.json"), `${JSON.stringify({ availability: "unavailable", reason: "decoded packets have no verified time-series gold/experience semantics", timeline: compactRows(["t", "team100", "team200", "diff"], goldTimeline) }, null, 2)}\n`, "utf8");
   await writeFile(join(root, "metadata.json"), `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
   await writeAiPreparation(root);
   const manifest = {
@@ -222,8 +243,8 @@ export async function refineReplay(inspection: RoflInspection, decoded: DecodeDe
       { file: "spell-casts.json", sourcePacket: "PKT_NPC_CastSpellAns_s", sourceParseLevel: 1, events: spellCasts.length, semanticValidation: "mapped caster plus decoded slot and coordinates" },
       { file: "damage-summary.json", sourcePacket: "PKT_UnitApplyDamage_s", sourceParseLevel: 2, events: damageMap.size, semanticValidation: "mapped player-to-player damage aggregated by source, target, and type" },
       { file: "items.json", sourcePacket: "PKT_BuyItemAns_s/PKT_UseItemAns_s", sourceParseLevel: 1, events: itemEvents.length, semanticValidation: "mapped player inventory actions" },
-      { file: "kills.json", sourcePacket: "PKT_NPC_Hero_Die_s", sourceParseLevel: 1, events: kills.length, semanticValidation: "victim and killer are mapped to replay-local player IDs when applicable" },
-      { file: "deaths.json", sourcePacket: "PKT_S2C_UpdateDeathTimer_s", sourceParseLevel: 0, events: deathEvents.length, semanticValidation: deathValidation ? "all player death counts match final stats" : "partial; treat as low confidence" },
+      { file: "kills.json", sourcePacket: "PKT_NPC_Hero_Die_s", sourceParseLevel: 1, events: kills.length, semanticValidation: deathValidation ? "victim NetIDs map to replay-local players and all death counts match final stats; killer remains null when no verified semantic field exists" : "partial; victim counts do not fully match final stats" },
+      { file: "deaths.json", sourcePacket: "PKT_NPC_Hero_Die_s/PKT_S2C_UpdateDeathTimer_s", sourceParseLevel: 0, events: deathEvents.length, semanticValidation: deathValidation ? "all player death counts match final stats" : "partial; treat as low confidence" },
       { file: "level-ups.json", sourcePacket: "PKT_NPC_LevelUp_s", sourceParseLevel: 2, events: levelUps.length, semanticValidation: "player mapping and level range validated" },
     ],
     automaticallyRetained: autoEntries,
@@ -239,5 +260,5 @@ export async function refineReplay(inspection: RoflInspection, decoded: DecodeDe
     writeFile(join(packetRoot, "level-ups.json"), `${JSON.stringify(compactRows(["t", "playerId", "level"], levelUps), null, 2)}\n`, "utf8"),
     writeFile(join(packetRoot, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8"),
   ]);
-  return { players, deathEvents, kills, levelUps, packetFiles: Number(decoded.counts.packetFiles ?? 0), packetRows: Number(decoded.counts.packetDataCount ?? 0), packetFilesSkipped: Math.max(0, Number(decoded.counts.packetFiles ?? 0) - 2), artifactRoot: root };
+  return { players, deathEvents, kills, levelUps, packetFiles: Number(decoded.counts.packetFileCount ?? 0), packetRows: Number(decoded.counts.packetDataCount ?? 0), packetFilesSkipped: Math.max(0, Number(decoded.counts.packetFileCount ?? 0) - 2), artifactRoot: root };
 }

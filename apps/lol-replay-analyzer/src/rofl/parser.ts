@@ -4,8 +4,12 @@ import type { ProgressReporter } from "../domain.js";
 import { HttpError, errorMessage, throwIfAborted } from "../errors.js";
 
 function progressValue(progress: ParserProgress): number | undefined {
-  const completed = Number(progress.completedBytes ?? progress.completed ?? progress.current);
-  const total = Number(progress.totalBytes ?? progress.total);
+  const completed = Number(
+    "completed" in progress ? progress.completed
+      : "downloaded" in progress ? progress.downloaded
+        : NaN,
+  );
+  const total = Number("total" in progress ? progress.total : NaN);
   return Number.isFinite(completed) && Number.isFinite(total) && total > 0
     ? Math.max(0, Math.min(1, completed / total))
     : undefined;

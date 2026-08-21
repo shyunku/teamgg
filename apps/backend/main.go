@@ -9,11 +9,13 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"team.gg-server/controllers"
 	"team.gg-server/core"
 	"team.gg-server/libs/crypto"
 	"team.gg-server/libs/db"
+	"team.gg-server/migrations"
 	"team.gg-server/service"
 	"team.gg-server/service/statistics"
 	"team.gg-server/third_party/riot"
@@ -56,26 +58,27 @@ func main() {
 		}
 	}
 
-	// Check environment variables
-	if err := util.CheckEnvironmentVariables([]string{
-		"APP_SERVER_PORT",
-		"DB_USER",
-		"DB_PASSWORD",
-		"DB_HOST",
-		"DB_PORT",
-		"DB_NAME",
-		"JWT_ACCESS_SECRET",
-		"JWT_ACCESS_EXPIRE",
-		"JWT_REFRESH_SECRET",
-		"JWT_REFRESH_EXPIRE",
-		"RSO_CLIENT_ID",
-		"RSO_CLIENT_SECRET",
-		"RSO_CLIENT_CALLBACK_URI",
-		"DEBUG",
-		"IS_PROD",
-		"REPLAY_ANALYZER_BASE_URL",
-		"REPLAY_ANALYZER_SHARED_SECRET",
-	}); err != nil {
+	migrationOnly := len(os.Args) > 1 && strings.EqualFold(os.Args[1], "migrate")
+	requiredEnvironment := []string{
+		"DB_USER", "DB_PASSWORD", "DB_HOST", "DB_PORT", "DB_NAME",
+	}
+	if !migrationOnly {
+		requiredEnvironment = append(requiredEnvironment,
+			"APP_SERVER_PORT",
+			"JWT_ACCESS_SECRET",
+			"JWT_ACCESS_EXPIRE",
+			"JWT_REFRESH_SECRET",
+			"JWT_REFRESH_EXPIRE",
+			"RSO_CLIENT_ID",
+			"RSO_CLIENT_SECRET",
+			"RSO_CLIENT_CALLBACK_URI",
+			"DEBUG",
+			"IS_PROD",
+			"REPLAY_ANALYZER_BASE_URL",
+			"REPLAY_ANALYZER_SHARED_SECRET",
+		)
+	}
+	if err := util.CheckEnvironmentVariables(requiredEnvironment); err != nil {
 		log.Error(err)
 		os.Exit(-1)
 	}
@@ -83,8 +86,30 @@ func main() {
 	// Init Root database
 	var err error
 	log.Info("Initializing database...")
-	if db.Root, err = db.Initiate(service.RootDatabaseInitializer); err != nil {
+	if db.Root, err = db.Initiate(nil); err != nil {
 		log.Error(err)
+		os.Exit(-4)
+	}
+	migrationMode, err := migrations.ResolveMode(migrationOnly)
+	if err != nil {
+		log.Error(err)
+		os.Exit(-4)
+	}
+	log.Infof("Database migration mode: %s", migrationMode)
+	if err = migrations.Run(ctx, db.Root.DB, migrationMode, core.Version); err != nil {
+		log.Error(err)
+		os.Exit(-4)
+	}
+	if migrationOnly {
+		log.Info("Database migrations completed")
+		if err := db.Root.Close(); err != nil {
+			log.Error(err)
+			os.Exit(-4)
+		}
+		return
+	}
+	if err := service.RootDatabaseInitializer(db.Root.DB); err != nil {
+		log.Error(fmt.Errorf("failed to initialize database: %w", err))
 		os.Exit(-4)
 	}
 	if statistics.StatisticsDB, err = db.Initiate(nil); err != nil {

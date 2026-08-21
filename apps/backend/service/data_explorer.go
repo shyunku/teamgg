@@ -20,21 +20,39 @@ import (
 const (
 	explorerSummonerBudgetKind = "summoner"
 	explorerMatchBudgetKind    = "match"
+
+	participantDiscoveryDisabled = "disabled"
+	participantDiscoveryBounded  = "bounded"
+	maxSupportedExplorerDepth    = 10
+	maxExplorerCleanupBatch      = 5000
+	minExplorerCleanupInterval   = 5 * time.Second
+	minExplorerRetention         = time.Hour
+	minExplorerRevisit           = 24 * time.Hour
 )
 
 type DataExplorer struct {
-	leaseDuration       time.Duration
-	pollInterval        time.Duration
-	bootstrapInterval   time.Duration
-	bootstrapBatchSize  int
-	summonerWorkers     int
-	matchWorkers        int
-	maxAttempts         int
-	dailySummonerBudget int
-	dailyMatchBudget    int
-	recentMatchCount    int
-	debugEnabled        bool
-	statusLogInterval   time.Duration
+	leaseDuration        time.Duration
+	pollInterval         time.Duration
+	bootstrapInterval    time.Duration
+	bootstrapBatchSize   int
+	summonerWorkers      int
+	matchWorkers         int
+	maxAttempts          int
+	dailySummonerBudget  int
+	dailyMatchBudget     int
+	recentMatchCount     int
+	maxDepth             int
+	participantDiscovery string
+	bootstrapEnabled     bool
+	cleanupEnabled       bool
+	cleanupInterval      time.Duration
+	cleanupBatchSize     int
+	completedRetention   time.Duration
+	sourceRetention      time.Duration
+	summonerRevisit      time.Duration
+	matchRevisit         time.Duration
+	debugEnabled         bool
+	statusLogInterval    time.Duration
 
 	explored atomic.Int64
 	success  atomic.Int64
@@ -43,19 +61,45 @@ type DataExplorer struct {
 
 func NewDataExplorer() *DataExplorer {
 	return &DataExplorer{
-		leaseDuration:       explorerEnvDuration("DATA_EXPLORER_LEASE", 5*time.Minute),
-		pollInterval:        explorerEnvDuration("DATA_EXPLORER_POLL_INTERVAL", time.Second),
-		bootstrapInterval:   explorerEnvDuration("DATA_EXPLORER_BOOTSTRAP_INTERVAL", 5*time.Second),
-		bootstrapBatchSize:  explorerEnvInt("DATA_EXPLORER_BOOTSTRAP_BATCH_SIZE", 500),
-		summonerWorkers:     explorerEnvInt("DATA_EXPLORER_SUMMONER_WORKERS", 1),
-		matchWorkers:        explorerEnvInt("DATA_EXPLORER_MATCH_WORKERS", 2),
-		maxAttempts:         explorerEnvInt("DATA_EXPLORER_MAX_ATTEMPTS", 8),
-		dailySummonerBudget: explorerEnvInt("DATA_EXPLORER_DAILY_SUMMONER_BUDGET", 500),
-		dailyMatchBudget:    explorerEnvInt("DATA_EXPLORER_DAILY_MATCH_BUDGET", 1500),
-		recentMatchCount:    explorerEnvInt("DATA_EXPLORER_MATCH_COUNT", types.DataExplorerLoadMatchesCount),
-		debugEnabled:        explorerEnvBool("DATA_EXPLORER_DEBUG", core.DebugMode),
-		statusLogInterval:   explorerEnvDuration("DATA_EXPLORER_STATUS_LOG_INTERVAL", 30*time.Second),
+		leaseDuration:        explorerEnvDuration("DATA_EXPLORER_LEASE", 5*time.Minute),
+		pollInterval:         explorerEnvDuration("DATA_EXPLORER_POLL_INTERVAL", time.Second),
+		bootstrapInterval:    explorerEnvDuration("DATA_EXPLORER_BOOTSTRAP_INTERVAL", 5*time.Second),
+		bootstrapBatchSize:   explorerEnvInt("DATA_EXPLORER_BOOTSTRAP_BATCH_SIZE", 500),
+		summonerWorkers:      explorerEnvInt("DATA_EXPLORER_SUMMONER_WORKERS", 1),
+		matchWorkers:         explorerEnvInt("DATA_EXPLORER_MATCH_WORKERS", 2),
+		maxAttempts:          explorerEnvInt("DATA_EXPLORER_MAX_ATTEMPTS", 8),
+		dailySummonerBudget:  explorerEnvInt("DATA_EXPLORER_DAILY_SUMMONER_BUDGET", 500),
+		dailyMatchBudget:     explorerEnvInt("DATA_EXPLORER_DAILY_MATCH_BUDGET", 1500),
+		recentMatchCount:     explorerEnvInt("DATA_EXPLORER_MATCH_COUNT", types.DataExplorerLoadMatchesCount),
+		maxDepth:             explorerEnvIntMax("DATA_EXPLORER_MAX_DEPTH", 0, maxSupportedExplorerDepth),
+		participantDiscovery: explorerParticipantDiscoveryPolicy(),
+		bootstrapEnabled:     explorerEnvBool("DATA_EXPLORER_BOOTSTRAP_ENABLED", false),
+		cleanupEnabled:       explorerEnvBool("DATA_EXPLORER_CLEANUP_ENABLED", false),
+		cleanupInterval:      explorerEnvDurationMin("DATA_EXPLORER_CLEANUP_INTERVAL", 30*time.Second, minExplorerCleanupInterval),
+		cleanupBatchSize:     explorerEnvIntMax("DATA_EXPLORER_CLEANUP_BATCH_SIZE", 500, maxExplorerCleanupBatch),
+		completedRetention:   explorerEnvDurationMin("DATA_EXPLORER_COMPLETED_JOB_RETENTION", 24*time.Hour, minExplorerRetention),
+		sourceRetention:      explorerEnvDurationMin("DATA_EXPLORER_SOURCE_RETENTION", 24*time.Hour, minExplorerRetention),
+		summonerRevisit:      explorerEnvDurationMin("DATA_EXPLORER_SUMMONER_REVISIT_INTERVAL", 30*24*time.Hour, minExplorerRevisit),
+		matchRevisit:         explorerEnvDurationMin("DATA_EXPLORER_MATCH_REVISIT_INTERVAL", 365*24*time.Hour, minExplorerRevisit),
+		debugEnabled:         explorerEnvBool("DATA_EXPLORER_DEBUG", core.DebugMode),
+		statusLogInterval:    explorerEnvDuration("DATA_EXPLORER_STATUS_LOG_INTERVAL", 30*time.Second),
 	}
+}
+
+func explorerEnvIntMax(key string, fallback, maximum int) int {
+	value := explorerEnvInt(key, fallback)
+	if value > maximum {
+		return maximum
+	}
+	return value
+}
+
+func explorerParticipantDiscoveryPolicy() string {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv("DATA_EXPLORER_PARTICIPANT_DISCOVERY")))
+	if value == participantDiscoveryBounded {
+		return participantDiscoveryBounded
+	}
+	return participantDiscoveryDisabled
 }
 
 func explorerEnvBool(key string, fallback bool) bool {
@@ -93,9 +137,16 @@ func explorerEnvDuration(key string, fallback time.Duration) time.Duration {
 	return duration
 }
 
+func explorerEnvDurationMin(key string, fallback, minimum time.Duration) time.Duration {
+	duration := explorerEnvDuration(key, fallback)
+	if duration < minimum {
+		return minimum
+	}
+	return duration
+}
+
 func IsDataExplorerEnabled() bool {
-	value := strings.ToLower(strings.TrimSpace(os.Getenv("DATA_EXPLORER_ENABLED")))
-	return value != "0" && value != "false" && value != "off"
+	return explorerEnvBool("DATA_EXPLORER_ENABLED", false)
 }
 
 func (de *DataExplorer) Loop() {
@@ -106,10 +157,14 @@ func (de *DataExplorer) Loop() {
 
 	log.Infof("DataExplorer enabled=%t debug=%t", true, de.debugEnabled)
 	log.Infof(
-		"DataExplorer config: summonerWorkers=%d matchWorkers=%d matchCount=%d dailyBudget=%d/%d lease=%s poll=%s bootstrap=%d/%s",
+		"DataExplorer config: summonerWorkers=%d matchWorkers=%d matchCount=%d dailyBudget=%d/%d lease=%s poll=%s bootstrap=%t/%d/%s participantDiscovery=%s maxDepth=%d revisit=%s/%s cleanup=%t/%s/%d retention=%s/%s",
 		de.summonerWorkers, de.matchWorkers, de.recentMatchCount,
 		de.dailySummonerBudget, de.dailyMatchBudget, de.leaseDuration,
-		de.pollInterval, de.bootstrapBatchSize, de.bootstrapInterval,
+		de.pollInterval, de.bootstrapEnabled, de.bootstrapBatchSize, de.bootstrapInterval,
+		de.participantDiscovery, de.maxDepth,
+		de.summonerRevisit, de.matchRevisit,
+		de.cleanupEnabled, de.cleanupInterval, de.cleanupBatchSize,
+		de.completedRetention, de.sourceRetention,
 	)
 
 	var workers sync.WaitGroup
@@ -128,11 +183,23 @@ func (de *DataExplorer) Loop() {
 			workers.Done()
 		}()
 	}
+	if de.bootstrapEnabled {
+		workers.Add(1)
+		go func() {
+			de.bootstrapExistingParticipants()
+			workers.Done()
+		}()
+	} else {
+		log.Info("DataExplorer participant bootstrap is disabled")
+	}
 	workers.Add(1)
 	go func() {
-		de.bootstrapExistingParticipants()
+		de.maintenanceWorker()
 		workers.Done()
 	}()
+	if !de.cleanupEnabled {
+		log.Info("DataExplorer completed job cleanup is disabled")
+	}
 	for i := 0; i < de.summonerWorkers; i++ {
 		workers.Add(1)
 		go func() {
@@ -148,6 +215,51 @@ func (de *DataExplorer) Loop() {
 		}()
 	}
 	workers.Wait()
+}
+
+func (de *DataExplorer) maintenanceWorker() {
+	ticker := time.NewTicker(de.cleanupInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		backfill, err := models.BackfillDataExplorerProcessingState(
+			db.Root,
+			de.summonerRevisit,
+			de.matchRevisit,
+			de.cleanupBatchSize,
+		)
+		if err != nil {
+			log.Errorf("DataExplorer processing state backfill failed: %v", err)
+			continue
+		}
+		if de.debugEnabled && (backfill.Summoners > 0 || backfill.Matches > 0) {
+			log.Debugf(
+				"DataExplorer processing state backfill: summoners=%d matches=%d",
+				backfill.Summoners,
+				backfill.Matches,
+			)
+		}
+		if !de.cleanupEnabled {
+			continue
+		}
+		result, err := models.CleanupDataExplorerCompletedRows(
+			db.Root,
+			de.completedRetention,
+			de.sourceRetention,
+			de.cleanupBatchSize,
+		)
+		if err != nil {
+			log.Errorf("DataExplorer cleanup failed: %v", err)
+			continue
+		}
+		if de.debugEnabled && (result.SummonerJobs > 0 || result.MatchJobs > 0 || result.MatchSources > 0) {
+			log.Debugf(
+				"DataExplorer cleanup: summonerJobs=%d matchJobs=%d matchSources=%d",
+				result.SummonerJobs,
+				result.MatchJobs,
+				result.MatchSources,
+			)
+		}
+	}
 }
 
 func (de *DataExplorer) statusWorker() {
@@ -298,7 +410,7 @@ func (de *DataExplorer) processSummonerJob(job *models.DataExplorerSummonerJobDA
 		if de.shouldLogProgress() {
 			log.Infof("DataExplorer summoner skipped: puuid=%s reason=already_cached", job.Puuid)
 		}
-		return models.CompleteDataExplorerSummonerJob(db.Root, job.Puuid)
+		return models.CompleteDataExplorerSummonerJob(db.Root, job.Puuid, de.summonerRevisit)
 	}
 
 	allowed, err := models.ConsumeDataExplorerDailyBudget(db.Root, explorerSummonerBudgetKind, de.dailySummonerBudget)
@@ -335,7 +447,7 @@ func (de *DataExplorer) processSummonerJob(job *models.DataExplorerSummonerJobDA
 			return err
 		}
 	}
-	return models.CompleteDataExplorerSummonerJob(db.Root, job.Puuid)
+	return models.CompleteDataExplorerSummonerJob(db.Root, job.Puuid, de.summonerRevisit)
 }
 
 func (de *DataExplorer) matchWorker() {
@@ -392,7 +504,10 @@ func (de *DataExplorer) processMatchJob(job *models.DataExplorerMatchJobDAO) err
 				return err
 			}
 		}
-		return models.CompleteDataExplorerMatchJob(db.Root, job.MatchId)
+		if err := de.discoverMatchParticipants(job); err != nil {
+			return err
+		}
+		return models.CompleteDataExplorerMatchJob(db.Root, job.MatchId, de.matchRevisit)
 	}
 
 	allowed, err := models.ConsumeDataExplorerDailyBudget(db.Root, explorerMatchBudgetKind, de.dailyMatchBudget)
@@ -413,7 +528,35 @@ func (de *DataExplorer) processMatchJob(job *models.DataExplorerMatchJobDAO) err
 	if err := SaveDataExplorerMatch(*match, sources); err != nil {
 		return err
 	}
-	return models.CompleteDataExplorerMatchJob(db.Root, job.MatchId)
+	if err := de.discoverMatchParticipants(job); err != nil {
+		return err
+	}
+	return models.CompleteDataExplorerMatchJob(db.Root, job.MatchId, de.matchRevisit)
+}
+
+func (de *DataExplorer) shouldDiscoverMatchParticipants(matchDepth int) bool {
+	return de.participantDiscovery == participantDiscoveryBounded &&
+		matchDepth >= 0 && matchDepth < de.maxDepth
+}
+
+func (de *DataExplorer) discoverMatchParticipants(job *models.DataExplorerMatchJobDAO) error {
+	if !de.shouldDiscoverMatchParticipants(job.Depth) {
+		return nil
+	}
+	participants, err := models.GetMatchParticipantDAOs(db.Root, job.MatchId)
+	if err != nil {
+		return err
+	}
+	nextDepth := job.Depth + 1
+	fromMatchId := job.MatchId
+	for _, participant := range participants {
+		if err := models.EnqueueDataExplorerSummonerJob(
+			db.Root, participant.Puuid, job.Priority-10, nextDepth, &fromMatchId,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (de *DataExplorer) retryDelay(attempt int) time.Duration {

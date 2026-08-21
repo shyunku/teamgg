@@ -58,8 +58,11 @@ export async function buildDigest(inspection: RoflInspection, decoded: DecodeDet
       packetEventsIncluded: refined.deathEvents.length + refined.kills.length + refined.levelUps.length,
       packetFilesSkipped: refined.packetFilesSkipped,
       warnings: [
-        "종료 통계는 고신뢰 데이터이며, 타임라인은 paramHint 정규화 후 검증된 사망·레벨업 이벤트만 포함합니다.",
-        "사건 입력은 검증된 킬·구조물·중립 오브젝트·위치·체력·피해·스킬·와드·시야·아이템 근거를 포함합니다.",
+        "종료 통계는 고신뢰 데이터이며, 사망 타임라인은 replay-local NetID 정규화 후 종료 통계의 플레이어별 데스 수와 대조합니다.",
+        refined.kills.some((event) => event.killerId === null)
+          ? "일부 패치에서는 사망자와 시각만 검증되며 killer NetID가 해석되지 않아 null로 표시됩니다."
+          : "킬 타임라인의 사망자와 killer NetID가 모두 검증된 의미 필드에서 해석되었습니다.",
+        "사건 입력은 현재 패치에서 검증 가능한 킬·구조물·중립 오브젝트·위치·체력·피해·스킬·와드·시야·아이템 근거만 포함합니다.",
         "시간대별 골드·경험치와 특정 와드의 시야 제공자는 파서에서 확인되지 않아 명시적으로 제외합니다.",
       ],
     },

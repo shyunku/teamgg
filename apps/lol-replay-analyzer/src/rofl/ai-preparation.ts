@@ -120,7 +120,7 @@ export async function writeAiPreparation(refinedRoot: string) {
       vision: {
         wardPlacements: compactRows(["t", "ownerId", "wardType", "x", "z"], wards.slice(-16)),
         playerVisibility: compactRows(["playerId", "entered", "left", "lastState", "lastT"], aggregateVisibility(visibility)),
-        limitation: "visibility channels are observed, but detectorWardNetId is unavailable in parser 0.4.0",
+        limitation: "visibility channels are observed, but detectorWardNetId is unavailable in the decoded packet semantics",
       },
       inventoryActions: compactRows(["t", "playerId", "action", "itemId", "slot", "count"], items.slice(-20)),
     });
@@ -132,7 +132,7 @@ export async function writeAiPreparation(refinedRoot: string) {
     players: compactRows(["playerId", "team", "champion", "position", "won"], players),
     economy: {
       availability: "unavailable",
-      reason: "rofl-parser 0.4.0 exposes final gold only; decoded namedParameters contain no time-series gold or experience values",
+      reason: "decoded namedParameters contain no verified time-series gold or experience values",
       teamGoldTimeline: compactRows(["t", "team100", "team200", "diff"], []),
       leadReversals: compactRows(["t", "beforeDiff", "afterDiff", "relatedEventId"], []),
       scoringRuleWhenAvailable: "event score adds up to 400 from absolute gold swing and 250 when the lead sign reverses",
@@ -144,7 +144,7 @@ export async function writeAiPreparation(refinedRoot: string) {
       damage: "source-target-type aggregate", spells: "caster-slot aggregate",
     },
     semantics: {
-      facts: "All event evidence comes from parser namedParameters.",
+      facts: "Event evidence comes from verified namedParameters, plus hero-death packet params whose player death counts are cross-checked against post-game stats.",
       interpretation: "Intent, causality, visibility advantage and alternative actions are hypotheses, never facts.",
       confidence: "Impact and evidence confidence are independent.",
       desiredOutput: "chronological event -> cause -> consequence -> actionable alternative, with impact and confidence separated",

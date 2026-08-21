@@ -28,6 +28,14 @@ export function normalizeAnalysisProgress(update: ProgressUpdate): number {
     case "complete": return 1;
   }
 }
+export function createMonotonicProgressReporter(report: ProgressReporter): ProgressReporter {
+  let previous = 0;
+  return (update) => {
+    const progress = Math.max(previous, normalizeAnalysisProgress(update));
+    previous = progress;
+    report({ ...update, progress });
+  };
+}
 async function writePromptArtifacts(decodedPath: string, digest: ReplayDigest, options: AnalysisOptions): Promise<void> {
   const root = join(decodedPath, "process", "prompt-assets"); await mkdir(root, { recursive: true });
   await Promise.all(buildPromptAssets(digest, options).map((asset) => writeFile(join(root, asset.fileName), `${JSON.stringify(asset.data, null, 2)}\n`, "utf8")));
@@ -40,7 +48,7 @@ export class ReplayAnalysisService {
   async analyze(upload: UploadedReplay, options: AnalysisOptions, signal: AbortSignal, report: ProgressReporter, onDelta?: TextDeltaReporter, runOptions: AnalysisRunOptions = {}): Promise<AnalysisResult> {
     let release: (() => void) | undefined; let decodedPath: string | undefined;
     const retainArtifacts = runOptions.retainArtifacts === true || this.config.keepArtifacts;
-    const reportOverall = (update: ProgressUpdate) => report({ ...update, progress: normalizeAnalysisProgress(update) });
+    const reportOverall = createMonotonicProgressReporter(report);
     try {
       if (!this.analyzer) throw new HttpError(503, "AI_NOT_CONFIGURED", "AI 분석 설정이 완료되지 않았습니다.");
       reportOverall({ stage: "queued", message: "분석 작업 대기열에 등록되었습니다.", detail: this.status }); release = await this.semaphore.acquire(signal); throwIfAborted(signal);

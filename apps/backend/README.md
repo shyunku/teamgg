@@ -51,6 +51,11 @@ DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_NAME=team_gg
 
+# Schema migration policy: validate (default), up, or off
+DB_MIGRATION_MODE=validate
+DB_MIGRATION_LOCK_TIMEOUT=30s
+DB_MIGRATION_SUMMONER_MATCH_BATCH=1000
+
 # Redis (optional; defaults preserve the old localhost setup)
 REDIS_ADDR=127.0.0.1:6379
 REDIS_PASSWORD=
@@ -77,12 +82,22 @@ REPLAY_ANALYZER_SHARED_SECRET=replace-with-a-long-random-shared-secret
 REPLAY_ANALYSIS_STALE_AFTER=45m
 
 # Background DataExplorer jobs (optional)
-DATA_EXPLORER_ENABLED=true
+DATA_EXPLORER_ENABLED=false
+DATA_EXPLORER_BOOTSTRAP_ENABLED=false
+DATA_EXPLORER_PARTICIPANT_DISCOVERY=disabled
+DATA_EXPLORER_MAX_DEPTH=0
 DATA_EXPLORER_SUMMONER_WORKERS=1
 DATA_EXPLORER_MATCH_WORKERS=2
 DATA_EXPLORER_DAILY_SUMMONER_BUDGET=500
 DATA_EXPLORER_DAILY_MATCH_BUDGET=1500
 DATA_EXPLORER_MATCH_COUNT=3
+DATA_EXPLORER_SUMMONER_REVISIT_INTERVAL=720h
+DATA_EXPLORER_MATCH_REVISIT_INTERVAL=8760h
+DATA_EXPLORER_CLEANUP_ENABLED=false
+DATA_EXPLORER_CLEANUP_INTERVAL=30s
+DATA_EXPLORER_CLEANUP_BATCH_SIZE=500
+DATA_EXPLORER_COMPLETED_JOB_RETENTION=24h
+DATA_EXPLORER_SOURCE_RETENTION=24h
 DATA_EXPLORER_BOOTSTRAP_BATCH_SIZE=500
 DATA_EXPLORER_BOOTSTRAP_INTERVAL=5s
 DATA_EXPLORER_POLL_INTERVAL=1s
@@ -109,7 +124,15 @@ STATISTICS_LOCK_RETRY_DELAY=15s
 STATISTICS_LOCK_TIMEOUT=1s
 ```
 
-Set a `DATA_EXPLORER_*_BUDGET` variable to `0` to disable that daily budget. Worker counts and budgets should be configured according to the rate limits of your Riot API product key.
+DataExplorer is disabled unless `DATA_EXPLORER_ENABLED=true` is set explicitly. Historical participant bootstrap is separately opt-in through `DATA_EXPLORER_BOOTSTRAP_ENABLED=true` because it can enqueue a large existing dataset.
+
+`DATA_EXPLORER_PARTICIPANT_DISCOVERY=disabled` stores requested matches without adding every match participant to the exploration queue. Set it to `bounded` only when relationship expansion is intended, and set `DATA_EXPLORER_MAX_DEPTH` to the highest permitted hop. Depth `0` processes seed summoners and their recent matches without expanding to other participants; depth `1` permits one participant hop. Values above `10` are clamped to `10`, and invalid values fall back to `0`. A job keeps its persisted depth when an expired lease is recovered after restart.
+
+Set a `DATA_EXPLORER_*_BUDGET` variable to `0` only when an uncapped daily budget is explicitly intended. Production should use finite summoner and match budgets configured according to the rate limits of the Riot API product key and available database capacity.
+
+Successful jobs persist `last_processed_at` and `next_eligible_at` in separate processing-state tables. Queue insertion checks this state, so removing completed queue rows does not immediately enqueue the same relationship graph again. The default revisit windows are 30 days for summoners and 365 days for immutable matches. Existing `done` jobs are copied to these tables through restart-safe primary-key cursors in the same small batch size; this state backfill runs even while deletion is disabled.
+
+Completed-job cleanup is disabled by default because it deletes database rows. After confirming the retention policy, set `DATA_EXPLORER_CLEANUP_ENABLED=true` to remove only `done` summoner/match jobs and completed match-source rows in batches. The default batch is 500 rows per table every 30 seconds, with 24-hour retention. Pending, processing, and failed jobs are never deleted by this cleanup. Safety bounds cap the batch at 5,000 rows, enforce a minimum five-second cleanup interval and one-hour retention, and prevent either revisit interval from being shorter than 24 hours.
 
 Statistics timing values use Go duration syntax, such as `30s`, `5m`, and `12h`. Each statistics job uses a different initial delay so that database aggregation jobs do not all start at once during server startup. `STATISTICS_LOCK_RETRY_DELAY` controls the short retry interval used when another statistics job holds the lock, while `STATISTICS_RETRY_DELAY` controls retries after an actual collection error. When multiple server instances are running, MySQL advisory locks and the shared `statistics_snapshots` cache prevent duplicate aggregation work.
 
@@ -134,13 +157,35 @@ When running in a container, the server can start entirely from process environm
 go mod download
 ```
 
-### 3. Apply the Database Schema
+### 3. Apply and Validate the Database Schema
 
-Apply the `scheme.ddl` schema file from the project root to your relational database.
+For a completely empty database, import `scheme.ddl` once. After that, the
+versioned migration runner manages incremental schema changes and records them
+in `schema_migrations` with a checksum and dirty state.
 
-When migrating an existing installation to the DataExplorer queue, stop server writes before applying `migrations/20260720_add_data_explorer_queue.sql`. This migration deduplicates and replaces the previously unkeyed `summoner_matches` data in seven-day batches. It retains the previous table as `summoner_matches_legacy_20260720` for verification.
+Run pending migrations explicitly before starting a new backend release:
 
-The shared statistics snapshot table is created automatically when the server starts. For a large existing database, apply `migrations/20260724_add_statistics_indexes.sql` once during a low-traffic maintenance window to add the recommended statistics query indexes.
+```bash
+go run . migrate
+# Docker Compose production deployment:
+docker compose run --rm backend migrate
+```
+
+Normal startup defaults to `DB_MIGRATION_MODE=validate`: it does not mutate the
+application schema and refuses to start when a migration is missing, dirty, has
+a changed checksum, or its expected schema has drifted. `up` applies migrations
+during startup and `off` disables both migration and drift checks; prefer the
+explicit `migrate` command and reserve `off` for emergency diagnosis.
+
+The `summoner_matches` migration creates a deduplicated replacement with the
+`(puuid, match_id)` primary key, mirrors concurrent inserts with a temporary
+trigger, backfills in bounded keyset batches, and swaps both tables atomically.
+The cursor is stored in `schema_migration_progress`, so a failed deployment can
+resume without copying all previously completed batches again.
+It retains `summoner_matches_legacy_20260820`; remove that backup manually only
+after row-count and application verification. The database user needs `CREATE`,
+`ALTER`, `INDEX`, `TRIGGER`, and `DROP` privileges. Run large index migrations
+during a low-traffic maintenance window.
 
 ### 4. Run the Development Server
 

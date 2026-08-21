@@ -4,6 +4,7 @@ apps/lol-replay-analyzer/.env
 .idea/
 .vscode/
 *.log
+tmp/
 
 .env
 .env.*

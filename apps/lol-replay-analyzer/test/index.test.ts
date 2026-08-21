@@ -9,7 +9,8 @@ import { Semaphore } from "../src/semaphore.js";
 import { buildApp, resolveCorsOrigin } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
 import { buildCandidates, calculateGoldSwing, objectiveImpact } from "../src/rofl/event-dossiers.js";
-import { normalizeAnalysisProgress } from "../src/service/replay-analysis-service.js";
+import { extractHeroDeaths } from "../src/rofl/refine.js";
+import { createMonotonicProgressReporter, normalizeAnalysisProgress } from "../src/service/replay-analysis-service.js";
 import { initializeSse } from "../src/http/sse.js";
 import { TeamggJobReporter, validateUploadTicket } from "../src/integration/teamgg.js";
 import { buildLoggerOptions, createAnalysisProgressLogger } from "../src/logging.js";
@@ -246,4 +247,25 @@ test("analysis stages map to monotonic overall progress", () => {
   ];
   assert.deepEqual(progress, [0.02, 0.05, 0.08, 0.25, 0.35, 0.7, 0.72, 0.8, 0.86, 1]);
   assert.equal(progress.every((value, index) => index === 0 || value >= (progress[index - 1] ?? 0)), true);
+});
+
+test("parser completion events cannot move reported progress backwards", () => {
+  const progress: number[] = [];
+  const report = createMonotonicProgressReporter((update) => progress.push(update.progress ?? 0));
+  report({ stage: "replay-decoding", message: "decoded", progress: 1 });
+  report({ stage: "replay-decoding", message: "complete" });
+  report({ stage: "digest-building", message: "refining" });
+  assert.deepEqual(progress, [0.7, 0.7, 0.72]);
+});
+
+test("hero death extraction falls back to packet param when patch semantics are generic", () => {
+  const players = new Map([[0x00ae, "p1"], [0x00b3, "p6"]]);
+  const events = extractHeroDeaths([
+    { timestamp: 55.149436, param: "0x400000AE", namedParameters: { selector_0_1: 0 } },
+    { timestamp: 70, param: "0x400000B3", namedParameters: { victimEntityNetId: "0x400000B3", killerNetId: "0x400000AE" } },
+  ], players);
+  assert.deepEqual(events, [
+    { t: 55.149, victimId: "p1", killerId: null },
+    { t: 70, victimId: "p6", killerId: "p1" },
+  ]);
 });

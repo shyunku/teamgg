@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"team.gg-server/libs/db"
 	"time"
 )
@@ -52,6 +53,17 @@ type DataExplorerDiagnostics struct {
 	BootstrapMatchId     string
 	BootstrapParticipant int
 	BootstrapCompleted   bool
+}
+
+type DataExplorerCleanupResult struct {
+	SummonerJobs int64
+	MatchJobs    int64
+	MatchSources int64
+}
+
+type DataExplorerStateBackfillResult struct {
+	Summoners int64
+	Matches   int64
 }
 
 type dataExplorerStatusCount struct {
@@ -119,9 +131,41 @@ func EnsureDataExplorerSchema(database db.Context) error {
 			usage_count INT NOT NULL DEFAULT 0,
 			PRIMARY KEY (usage_date, usage_kind)
 		) ENGINE=InnoDB`,
+		`CREATE TABLE IF NOT EXISTS data_explorer_summoner_processing_state (
+			puuid VARCHAR(255) NOT NULL,
+			last_processed_at DATETIME(6) NOT NULL,
+			next_eligible_at DATETIME(6) NOT NULL,
+			updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+			PRIMARY KEY (puuid),
+			KEY data_explorer_summoner_state_eligible_index (next_eligible_at)
+		) ENGINE=InnoDB`,
+		`CREATE TABLE IF NOT EXISTS data_explorer_match_processing_state (
+			match_id VARCHAR(255) NOT NULL,
+			last_processed_at DATETIME(6) NOT NULL,
+			next_eligible_at DATETIME(6) NOT NULL,
+			updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+			PRIMARY KEY (match_id),
+			KEY data_explorer_match_state_eligible_index (next_eligible_at)
+		) ENGINE=InnoDB`,
+		`CREATE TABLE IF NOT EXISTS data_explorer_source_cleanup_state (
+			state_key VARCHAR(64) NOT NULL,
+			cursor_match_id VARCHAR(255) NOT NULL DEFAULT '',
+			cursor_puuid VARCHAR(255) NOT NULL DEFAULT '',
+			updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+			PRIMARY KEY (state_key)
+		) ENGINE=InnoDB`,
 		`INSERT IGNORE INTO data_explorer_state
 			(state_key, cursor_match_id, cursor_participant_id, completed)
 			VALUES ('match_participant_bootstrap', '', 0, 0)`,
+		`INSERT IGNORE INTO data_explorer_state
+			(state_key, cursor_match_id, cursor_participant_id, completed)
+			VALUES ('summoner_processing_state_backfill', '', 0, 0)`,
+		`INSERT IGNORE INTO data_explorer_state
+			(state_key, cursor_match_id, cursor_participant_id, completed)
+			VALUES ('match_processing_state_backfill', '', 0, 0)`,
+		`INSERT IGNORE INTO data_explorer_source_cleanup_state
+			(state_key, cursor_match_id, cursor_puuid)
+			VALUES ('completed_match_sources', '', '')`,
 	}
 	for _, statement := range statements {
 		if _, err := database.Exec(statement); err != nil {
@@ -155,11 +199,34 @@ func EnqueueDataExplorerSummonerJob(database db.Context, puuid string, priority,
 	_, err := database.Exec(`
 		INSERT INTO data_explorer_summoner_jobs
 			(puuid, status, priority, depth, attempts, next_attempt_at, lease_until, discovered_from_match_id, last_error)
-		VALUES (?, 'pending', ?, ?, 0, NOW(6), NULL, ?, NULL)
+		SELECT ?, 'pending', ?, ?, 0, NOW(6), NULL, ?, NULL
+		FROM DUAL
+		WHERE NOT EXISTS (
+			SELECT 1 FROM data_explorer_summoner_processing_state
+			WHERE puuid = ? AND next_eligible_at > NOW(6)
+		)
 		ON DUPLICATE KEY UPDATE
 			priority = GREATEST(priority, VALUES(priority)),
-			depth = LEAST(depth, VALUES(depth))
-	`, puuid, priority, depth, fromMatchId)
+			depth = LEAST(depth, VALUES(depth)),
+			next_attempt_at = IF(
+				status = 'done' AND EXISTS (
+					SELECT 1 FROM data_explorer_summoner_processing_state
+					WHERE puuid = ? AND next_eligible_at <= NOW(6)
+				), NOW(6), next_attempt_at
+			),
+			attempts = IF(
+				status = 'done' AND EXISTS (
+					SELECT 1 FROM data_explorer_summoner_processing_state
+					WHERE puuid = ? AND next_eligible_at <= NOW(6)
+				), 0, attempts
+			),
+			status = IF(
+				status = 'done' AND EXISTS (
+					SELECT 1 FROM data_explorer_summoner_processing_state
+					WHERE puuid = ? AND next_eligible_at <= NOW(6)
+				), 'pending', status
+			)
+	`, puuid, priority, depth, fromMatchId, puuid, puuid, puuid, puuid)
 	return err
 }
 
@@ -168,8 +235,13 @@ func EnqueueDataExplorerMatchJob(database db.Context, matchId, puuid string, pri
 		return nil
 	}
 	sourceResult, err := database.Exec(`
-		INSERT IGNORE INTO data_explorer_match_sources (match_id, puuid) VALUES (?, ?)
-	`, matchId, puuid)
+		INSERT IGNORE INTO data_explorer_match_sources (match_id, puuid)
+		SELECT ?, ? FROM DUAL
+		WHERE NOT EXISTS (
+			SELECT 1 FROM data_explorer_match_processing_state
+			WHERE match_id = ? AND next_eligible_at > NOW(6)
+		)
+	`, matchId, puuid, matchId)
 	if err != nil {
 		return err
 	}
@@ -177,17 +249,53 @@ func EnqueueDataExplorerMatchJob(database db.Context, matchId, puuid string, pri
 	if err != nil {
 		return err
 	}
+	// A cached match does not need to be fetched just to connect a newly
+	// discovered summoner. This also covers legacy done jobs before their
+	// processing state has been backfilled.
+	if _, err = database.Exec(`
+		INSERT IGNORE INTO summoner_matches (puuid, match_id)
+		SELECT ?, ?
+		FROM matches
+		WHERE match_id = ?
+		  AND NOT EXISTS (
+			SELECT 1 FROM summoner_matches
+			WHERE puuid = ? AND match_id = ?
+		  )
+	`, puuid, matchId, matchId, puuid, matchId); err != nil {
+		return err
+	}
 	_, err = database.Exec(`
 		INSERT INTO data_explorer_match_jobs
 			(match_id, status, priority, depth, attempts, next_attempt_at, lease_until, last_error, rescan_requested)
-		VALUES (?, 'pending', ?, ?, 0, NOW(6), NULL, NULL, 1)
+		SELECT ?, 'pending', ?, ?, 0, NOW(6), NULL, NULL, 1
+		FROM DUAL
+		WHERE NOT EXISTS (
+			SELECT 1 FROM data_explorer_match_processing_state
+			WHERE match_id = ? AND next_eligible_at > NOW(6)
+		)
 		ON DUPLICATE KEY UPDATE
 			priority = GREATEST(priority, VALUES(priority)),
 			depth = LEAST(depth, VALUES(depth)),
-			next_attempt_at = IF(? > 0 AND status = 'done', NOW(6), next_attempt_at),
-			status = IF(? > 0 AND status = 'done', 'pending', status),
-			rescan_requested = IF(? > 0, 1, rescan_requested)
-	`, matchId, priority, depth, newSourceCount, newSourceCount, newSourceCount)
+			next_attempt_at = IF(
+				status = 'done' AND EXISTS (
+					SELECT 1 FROM data_explorer_match_processing_state
+					WHERE match_id = ? AND next_eligible_at <= NOW(6)
+				), NOW(6), next_attempt_at
+			),
+			attempts = IF(
+				status = 'done' AND EXISTS (
+					SELECT 1 FROM data_explorer_match_processing_state
+					WHERE match_id = ? AND next_eligible_at <= NOW(6)
+				), 0, attempts
+			),
+			status = IF(
+				status = 'done' AND EXISTS (
+					SELECT 1 FROM data_explorer_match_processing_state
+					WHERE match_id = ? AND next_eligible_at <= NOW(6)
+				), 'pending', status
+			),
+			rescan_requested = IF(? > 0 OR status IN ('pending', 'processing'), 1, rescan_requested)
+	`, matchId, priority, depth, matchId, matchId, matchId, matchId, newSourceCount)
 	return err
 }
 
@@ -343,7 +451,17 @@ func GetDataExplorerDiagnostics(database db.Context) (*DataExplorerDiagnostics, 
 	return diagnostics, nil
 }
 
-func CompleteDataExplorerSummonerJob(database db.Context, puuid string) error {
+func CompleteDataExplorerSummonerJob(database db.Context, puuid string, revisitInterval time.Duration) error {
+	if _, err := database.Exec(`
+		INSERT INTO data_explorer_summoner_processing_state
+			(puuid, last_processed_at, next_eligible_at)
+		VALUES (?, NOW(6), TIMESTAMPADD(SECOND, ?, NOW(6)))
+		ON DUPLICATE KEY UPDATE
+			last_processed_at = VALUES(last_processed_at),
+			next_eligible_at = VALUES(next_eligible_at)
+	`, puuid, int64(revisitInterval/time.Second)); err != nil {
+		return err
+	}
 	_, err := database.Exec(`
 		UPDATE data_explorer_summoner_jobs
 		SET status = 'done', lease_until = NULL, last_error = NULL, updated_at = NOW(6)
@@ -352,7 +470,17 @@ func CompleteDataExplorerSummonerJob(database db.Context, puuid string) error {
 	return err
 }
 
-func CompleteDataExplorerMatchJob(database db.Context, matchId string) error {
+func CompleteDataExplorerMatchJob(database db.Context, matchId string, revisitInterval time.Duration) error {
+	if _, err := database.Exec(`
+		INSERT INTO data_explorer_match_processing_state
+			(match_id, last_processed_at, next_eligible_at)
+		VALUES (?, NOW(6), TIMESTAMPADD(SECOND, ?, NOW(6)))
+		ON DUPLICATE KEY UPDATE
+			last_processed_at = VALUES(last_processed_at),
+			next_eligible_at = VALUES(next_eligible_at)
+	`, matchId, int64(revisitInterval/time.Second)); err != nil {
+		return err
+	}
 	_, err := database.Exec(`
 		UPDATE data_explorer_match_jobs
 		SET status = IF(rescan_requested = 1, 'pending', 'done'),
@@ -361,6 +489,265 @@ func CompleteDataExplorerMatchJob(database db.Context, matchId string) error {
 		WHERE match_id = ?
 	`, matchId)
 	return err
+}
+
+func CleanupDataExplorerCompletedRows(
+	database db.Context,
+	completedRetention time.Duration,
+	sourceRetention time.Duration,
+	batchSize int,
+) (*DataExplorerCleanupResult, error) {
+	result := &DataExplorerCleanupResult{}
+	if batchSize <= 0 {
+		return result, nil
+	}
+
+	var err error
+	result.MatchSources, err = cleanupDataExplorerMatchSourceBatch(database, sourceRetention, batchSize)
+	if err != nil {
+		return nil, err
+	}
+
+	summonerResult, err := database.Exec(`
+		DELETE FROM data_explorer_summoner_jobs
+		WHERE status = 'done'
+		  AND updated_at < TIMESTAMPADD(SECOND, ?, NOW(6))
+		  AND EXISTS (
+			SELECT 1 FROM data_explorer_summoner_processing_state processing_state
+			WHERE processing_state.puuid = data_explorer_summoner_jobs.puuid
+		  )
+		LIMIT ?
+	`, -int64(completedRetention/time.Second), batchSize)
+	if err != nil {
+		return nil, err
+	}
+	result.SummonerJobs, err = summonerResult.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	matchResult, err := database.Exec(`
+		DELETE FROM data_explorer_match_jobs
+		WHERE status = 'done'
+		  AND updated_at < TIMESTAMPADD(SECOND, ?, NOW(6))
+		  AND EXISTS (
+			SELECT 1 FROM data_explorer_match_processing_state processing_state
+			WHERE processing_state.match_id = data_explorer_match_jobs.match_id
+		  )
+		LIMIT ?
+	`, -int64(completedRetention/time.Second), batchSize)
+	if err != nil {
+		return nil, err
+	}
+	result.MatchJobs, err = matchResult.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+type dataExplorerSourceCleanupRow struct {
+	MatchId  string `db:"match_id"`
+	Puuid    string `db:"puuid"`
+	Eligible bool   `db:"eligible"`
+}
+
+func cleanupDataExplorerMatchSourceBatch(
+	database db.Context,
+	retention time.Duration,
+	batchSize int,
+) (int64, error) {
+	var cursor struct {
+		MatchId string `db:"cursor_match_id"`
+		Puuid   string `db:"cursor_puuid"`
+	}
+	if err := database.Get(&cursor, `
+		SELECT cursor_match_id, cursor_puuid
+		FROM data_explorer_source_cleanup_state
+		WHERE state_key = 'completed_match_sources'
+	`); err != nil {
+		return 0, err
+	}
+
+	rows := make([]dataExplorerSourceCleanupRow, 0, batchSize)
+	retentionSeconds := -int64(retention / time.Second)
+	if err := database.Select(&rows, `
+		SELECT source_row.match_id, source_row.puuid,
+		       COALESCE((
+			   source_row.created_at < TIMESTAMPADD(SECOND, ?, NOW(6))
+			   AND processing_state.last_processed_at < TIMESTAMPADD(SECOND, ?, NOW(6))
+			   AND (job.status IS NULL OR job.status = 'done')
+		       ), 0) AS eligible
+		FROM data_explorer_match_sources source_row
+		LEFT JOIN data_explorer_match_processing_state processing_state
+		       ON processing_state.match_id = source_row.match_id
+		LEFT JOIN data_explorer_match_jobs job ON job.match_id = source_row.match_id
+		WHERE source_row.match_id > ? OR (source_row.match_id = ? AND source_row.puuid > ?)
+		ORDER BY source_row.match_id, source_row.puuid
+		LIMIT ?
+	`, retentionSeconds, retentionSeconds, cursor.MatchId, cursor.MatchId, cursor.Puuid, batchSize); err != nil {
+		return 0, err
+	}
+	if len(rows) == 0 {
+		_, err := database.Exec(`
+			UPDATE data_explorer_source_cleanup_state
+			SET cursor_match_id = '', cursor_puuid = '', updated_at = NOW(6)
+			WHERE state_key = 'completed_match_sources'
+		`)
+		return 0, err
+	}
+
+	clauses := make([]string, 0, len(rows))
+	args := make([]interface{}, 0, len(rows)*2)
+	for _, row := range rows {
+		if !row.Eligible {
+			continue
+		}
+		clauses = append(clauses, "(match_id = ? AND puuid = ?)")
+		args = append(args, row.MatchId, row.Puuid)
+	}
+	var deleted int64
+	if len(clauses) > 0 {
+		deleteResult, err := database.Exec(`
+			DELETE FROM data_explorer_match_sources
+			WHERE `+strings.Join(clauses, " OR "), args...)
+		if err != nil {
+			return 0, err
+		}
+		deleted, err = deleteResult.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	last := rows[len(rows)-1]
+	if _, err := database.Exec(`
+		UPDATE data_explorer_source_cleanup_state
+		SET cursor_match_id = ?, cursor_puuid = ?, updated_at = NOW(6)
+		WHERE state_key = 'completed_match_sources'
+	`, last.MatchId, last.Puuid); err != nil {
+		return 0, err
+	}
+	return deleted, nil
+}
+
+func BackfillDataExplorerProcessingState(
+	database db.Context,
+	summonerRevisit time.Duration,
+	matchRevisit time.Duration,
+	batchSize int,
+) (*DataExplorerStateBackfillResult, error) {
+	result := &DataExplorerStateBackfillResult{}
+	if batchSize <= 0 {
+		return result, nil
+	}
+
+	var err error
+	result.Summoners, err = backfillDataExplorerProcessingStateBatch(
+		database,
+		"summoner_processing_state_backfill",
+		"data_explorer_summoner_jobs",
+		"puuid",
+		"data_explorer_summoner_processing_state",
+		summonerRevisit,
+		batchSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	result.Matches, err = backfillDataExplorerProcessingStateBatch(
+		database,
+		"match_processing_state_backfill",
+		"data_explorer_match_jobs",
+		"match_id",
+		"data_explorer_match_processing_state",
+		matchRevisit,
+		batchSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+type dataExplorerProcessingStateBackfillRow struct {
+	EntityId string    `db:"entity_id"`
+	Updated  time.Time `db:"updated_at"`
+}
+
+func backfillDataExplorerProcessingStateBatch(
+	database db.Context,
+	stateKey string,
+	jobTable string,
+	idColumn string,
+	processingStateTable string,
+	revisitInterval time.Duration,
+	batchSize int,
+) (int64, error) {
+	var cursor struct {
+		Id        string `db:"cursor_match_id"`
+		Completed bool   `db:"completed"`
+	}
+	if err := database.Get(&cursor, `
+		SELECT cursor_match_id, completed
+		FROM data_explorer_state
+		WHERE state_key = ?
+	`, stateKey); err != nil {
+		return 0, err
+	}
+	if cursor.Completed {
+		return 0, nil
+	}
+
+	rows := make([]dataExplorerProcessingStateBackfillRow, 0, batchSize)
+	query := fmt.Sprintf(`
+		SELECT %s AS entity_id, updated_at
+		FROM %s
+		WHERE status = 'done' AND %s > ?
+		ORDER BY %s
+		LIMIT ?
+	`, idColumn, jobTable, idColumn, idColumn)
+	if err := database.Select(&rows, query, cursor.Id, batchSize); err != nil {
+		return 0, err
+	}
+	if len(rows) == 0 {
+		_, err := database.Exec(`
+			UPDATE data_explorer_state
+			SET completed = 1, updated_at = NOW(6)
+			WHERE state_key = ?
+		`, stateKey)
+		return 0, err
+	}
+
+	valueClause := "(?, ?, TIMESTAMPADD(SECOND, ?, NOW(6)))"
+	values := make([]string, 0, len(rows))
+	args := make([]interface{}, 0, len(rows)*3)
+	seconds := int64(revisitInterval / time.Second)
+	for _, row := range rows {
+		values = append(values, valueClause)
+		args = append(args, row.EntityId, row.Updated, seconds)
+	}
+	insertQuery := fmt.Sprintf(`
+		INSERT IGNORE INTO %s (%s, last_processed_at, next_eligible_at)
+		VALUES %s
+	`, processingStateTable, idColumn, strings.Join(values, ","))
+	insertResult, err := database.Exec(insertQuery, args...)
+	if err != nil {
+		return 0, err
+	}
+	inserted, err := insertResult.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	last := rows[len(rows)-1]
+	if _, err := database.Exec(`
+		UPDATE data_explorer_state
+		SET cursor_match_id = ?, completed = 0, updated_at = NOW(6)
+		WHERE state_key = ?
+	`, last.EntityId, stateKey); err != nil {
+		return 0, err
+	}
+	return inserted, nil
 }
 
 func RetryDataExplorerSummonerJob(database db.Context, puuid string, attempts, maxAttempts int, retryDelay time.Duration, failure error) error {
