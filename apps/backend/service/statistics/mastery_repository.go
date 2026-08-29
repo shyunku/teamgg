@@ -32,8 +32,8 @@ type MasteryStatisticsItem struct {
 	MaxMastery   int64   `json:"maxMastery"`
 	TotalMastery int64   `json:"totalMastery"`
 
-	MasteredCount int                             `json:"masteredCount"`
-	Summoners     int                             `json:"summoners"`
+	MasteredCount int64                           `json:"masteredCount"`
+	Summoners     int64                           `json:"summoners"`
 	Rankers       []MasteryStatisticsTopSummoners `json:"rankers"`
 }
 
@@ -98,6 +98,16 @@ func (msr *MasteryStatisticsRepository) collectCoordinatedScheduled(ctx context.
 func (msr *MasteryStatisticsRepository) collect(database db.Context) (*MasteryStatistics, error) {
 	log.Infof("Collecting %s statistics...", msr.key())
 
+	refresh, err := statistics_models.RefreshDirtyMasteryStatisticsAggregates(database, 1000)
+	if err != nil {
+		log.Error(err)
+		return nil, err
+	}
+	log.Infof(
+		"%s incremental aggregates refreshed: dirty=%d refreshed=%d removed=%d duration=%s",
+		msr.key(), refresh.DirtyChampions, refresh.Refreshed, refresh.Removed, refresh.Duration,
+	)
+
 	// collect data
 	masteryMXDAOs, err := statistics_models.GetMasteryStatisticsMXDAOs(database)
 	if err != nil {
@@ -124,8 +134,8 @@ func (msr *MasteryStatisticsRepository) collect(database db.Context) (*MasterySt
 				ChampionId:    masteryMXDAO.ChampionId,
 				ChampionName:  champion.Name,
 				AvgMastery:    masteryMXDAO.AvgMastery,
-				MaxMastery:    int64(masteryMXDAO.MaxMastery),
-				TotalMastery:  int64(masteryMXDAO.TotalMastery),
+				MaxMastery:    masteryMXDAO.MaxMastery,
+				TotalMastery:  masteryMXDAO.TotalMastery,
 				MasteredCount: masteryMXDAO.MasteredCount,
 				Summoners:     masteryMXDAO.Count,
 				Rankers:       make([]MasteryStatisticsTopSummoners, 0),

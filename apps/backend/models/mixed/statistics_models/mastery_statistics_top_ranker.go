@@ -23,13 +23,12 @@ func GetMasteryStatisticsTopRankersMXDAOs(db db.Context, topRanks int) ([]*Maste
 		return make([]*MasteryStatisticsTopRankersMXDAO, 0), nil
 	}
 
-	// A ROW_NUMBER() partition over the complete mastery table forces MySQL to
-	// sort every mastery row. Read the small champion key set first, then use
-	// the (champion_id, champion_points DESC) index for a bounded top-N lookup.
+	// Read the materialized champion key set, then perform one bounded covering
+	// index lookup per champion instead of sorting the complete mastery table.
 	var championIds []int
 	if err := db.Select(&championIds, `
-		SELECT DISTINCT champion_id
-		FROM masteries
+		SELECT champion_id
+		FROM mastery_statistics_aggregates
 		ORDER BY champion_id
 	`); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -49,7 +48,7 @@ func GetMasteryStatisticsTopRankersMXDAOs(db db.Context, topRanks int) ([]*Maste
 				s.profile_icon_id,
 				m.champion_id,
 				m.champion_points
-			FROM masteries m
+			FROM masteries m FORCE INDEX (masteries_champion_points_level_covering_index)
 			LEFT JOIN summoners s ON m.puuid = s.puuid
 			WHERE m.champion_id = ?
 			ORDER BY m.champion_points DESC

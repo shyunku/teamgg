@@ -3,392 +3,429 @@ package statistics_models
 import (
 	"database/sql"
 	"errors"
+	"fmt"
+	"time"
+
+	"github.com/jmoiron/sqlx"
 	log "github.com/shyunku-libraries/go-logger"
-	"strings"
 	"team.gg-server/libs/db"
 )
 
-func CreateTemporaryTables(db db.Context, matchGameVersions []string) error {
+const championDetailStatisticsSourceTable = "champion_detail_statistics_source"
+
+const createRecentChampionBuildsQuery = `
+	INSERT INTO champion_detail_statistics_source (
+		match_id, match_participant_id, champion_id, champion_name, team_position,
+		kills, deaths, assists, team_id, summoner1_id, summoner2_id, win,
+		enemy_champion_id, enemy_champion_name, enemy_kills, enemy_deaths, enemy_assists, enemy_win,
+		primary_style, primary_perk0, primary_perk1, primary_perk2, primary_perk3,
+		sub_style, sub_perk0, sub_perk1,
+		stat_perk_defense, stat_perk_flex, stat_perk_offense,
+		item0_id, item0_name, item1_id, item1_name, item2_id, item2_name,
+		item3_id, item3_name, item4_id, item4_name, item5_id, item5_name
+	)
+	WITH RecentMatches AS (
+		SELECT match_id
+		FROM matches FORCE INDEX (matches_game_version_index)
+		WHERE game_version IN (?)
+	), RecentParticipants AS (
+		SELECT
+			mp.match_id,
+			mp.match_participant_id,
+			mp.champion_id,
+			mp.champion_name,
+			mp.team_position,
+			mp.kills,
+			mp.deaths,
+			mp.assists,
+			mp.team_id,
+			mp.summoner1_id,
+			mp.summoner2_id,
+			mp.item0,
+			mp.item1,
+			mp.item2,
+			mp.item3,
+			mp.item4,
+			mp.item5,
+			mp.item6,
+			mp.win
+		FROM RecentMatches rm
+		INNER JOIN match_participants mp ON mp.match_id = rm.match_id
+		WHERE mp.team_position != ''
+	), ParticipantOpponents AS (
+		SELECT
+			rp.*,
+			enemy.champion_id AS enemy_champion_id,
+			enemy.champion_name AS enemy_champion_name,
+			enemy.kills AS enemy_kills,
+			enemy.deaths AS enemy_deaths,
+			enemy.assists AS enemy_assists,
+			enemy.win AS enemy_win
+		FROM RecentParticipants rp
+		LEFT JOIN RecentParticipants enemy
+			ON enemy.match_id = rp.match_id
+			AND enemy.team_id != rp.team_id
+			AND enemy.team_position = rp.team_position
+	), RankedPerkSelections AS (
+		SELECT
+			style.match_participant_id,
+			style.style_id,
+			style.description,
+			style.style,
+			selection.perk,
+			ROW_NUMBER() OVER (
+				PARTITION BY style.style_id
+				ORDER BY selection.perk DESC
+			) AS perk_rank
+		FROM RecentParticipants rp
+		INNER JOIN match_participant_perk_styles style
+			ON style.match_participant_id = rp.match_participant_id
+		INNER JOIN match_participant_perk_style_selections selection
+			ON selection.style_id = style.style_id
+	), ParticipantPerks AS (
+		SELECT
+			ranked.match_participant_id,
+			MAX(CASE WHEN ranked.description = 'primaryStyle' THEN ranked.style END) AS primary_style,
+			MAX(CASE WHEN ranked.description = 'primaryStyle' AND ranked.perk_rank = 1 THEN ranked.perk END) AS primary_perk0,
+			MAX(CASE WHEN ranked.description = 'primaryStyle' AND ranked.perk_rank = 2 THEN ranked.perk END) AS primary_perk1,
+			MAX(CASE WHEN ranked.description = 'primaryStyle' AND ranked.perk_rank = 3 THEN ranked.perk END) AS primary_perk2,
+			MAX(CASE WHEN ranked.description = 'primaryStyle' AND ranked.perk_rank = 4 THEN ranked.perk END) AS primary_perk3,
+			MAX(CASE WHEN ranked.description = 'subStyle' THEN ranked.style END) AS sub_style,
+			MAX(CASE WHEN ranked.description = 'subStyle' AND ranked.perk_rank = 1 THEN ranked.perk END) AS sub_perk0,
+			MAX(CASE WHEN ranked.description = 'subStyle' AND ranked.perk_rank = 2 THEN ranked.perk END) AS sub_perk1,
+			MAX(perks.stat_perk_defense) AS stat_perk_defense,
+			MAX(perks.stat_perk_flex) AS stat_perk_flex,
+			MAX(perks.stat_perk_offense) AS stat_perk_offense
+		FROM RankedPerkSelections ranked
+		INNER JOIN match_participant_perks perks
+			ON perks.match_participant_id = ranked.match_participant_id
+		GROUP BY ranked.match_participant_id
+	), RankedItems AS (
+		SELECT
+			rp.match_id,
+			rp.match_participant_id,
+			item.id AS item_id,
+			item.name AS item_name,
+			ROW_NUMBER() OVER (
+				PARTITION BY rp.match_id, rp.match_participant_id
+				ORDER BY item.depth DESC, item.gold_total DESC
+			) AS item_rank
+		FROM RecentParticipants rp
+		INNER JOIN static_items item
+			ON item.id IN (rp.item0, rp.item1, rp.item2, rp.item3, rp.item4, rp.item5, rp.item6)
+		WHERE item.id != 0
+			AND item.required_ally IS NULL
+			AND item.gold_purchasable IS TRUE
+			AND item.gold_total > 0
+			AND item.depth >= 3
+	)
+	SELECT
+		participant.match_id,
+		participant.match_participant_id,
+		participant.champion_id,
+		participant.champion_name,
+		participant.team_position,
+		participant.kills,
+		participant.deaths,
+		participant.assists,
+		participant.team_id,
+		participant.summoner1_id,
+		participant.summoner2_id,
+		participant.win,
+		participant.enemy_champion_id,
+		participant.enemy_champion_name,
+		participant.enemy_kills,
+		participant.enemy_deaths,
+		participant.enemy_assists,
+		participant.enemy_win,
+		perks.primary_style,
+		perks.primary_perk0,
+		perks.primary_perk1,
+		perks.primary_perk2,
+		perks.primary_perk3,
+		perks.sub_style,
+		perks.sub_perk0,
+		perks.sub_perk1,
+		perks.stat_perk_defense,
+		perks.stat_perk_flex,
+		perks.stat_perk_offense,
+		MAX(CASE WHEN item.item_rank = 1 THEN item.item_id END) AS item0_id,
+		MAX(CASE WHEN item.item_rank = 1 THEN item.item_name END) AS item0_name,
+		MAX(CASE WHEN item.item_rank = 2 THEN item.item_id END) AS item1_id,
+		MAX(CASE WHEN item.item_rank = 2 THEN item.item_name END) AS item1_name,
+		MAX(CASE WHEN item.item_rank = 3 THEN item.item_id END) AS item2_id,
+		MAX(CASE WHEN item.item_rank = 3 THEN item.item_name END) AS item2_name,
+		MAX(CASE WHEN item.item_rank = 4 THEN item.item_id END) AS item3_id,
+		MAX(CASE WHEN item.item_rank = 4 THEN item.item_name END) AS item3_name,
+		MAX(CASE WHEN item.item_rank = 5 THEN item.item_id END) AS item4_id,
+		MAX(CASE WHEN item.item_rank = 5 THEN item.item_name END) AS item4_name,
+		MAX(CASE WHEN item.item_rank = 6 THEN item.item_id END) AS item5_id,
+		MAX(CASE WHEN item.item_rank = 6 THEN item.item_name END) AS item5_name
+	FROM ParticipantOpponents participant
+	INNER JOIN ParticipantPerks perks
+		ON perks.match_participant_id = participant.match_participant_id
+	INNER JOIN RankedItems item
+		ON item.match_participant_id = participant.match_participant_id
+	WHERE perks.primary_style IS NOT NULL
+		AND perks.sub_style IS NOT NULL
+		AND perks.primary_style != 0
+		AND perks.primary_perk1 IS NOT NULL
+		AND perks.primary_perk2 IS NOT NULL
+		AND perks.primary_perk3 IS NOT NULL
+		AND perks.sub_style != 0
+		AND perks.sub_perk0 IS NOT NULL
+		AND perks.sub_perk1 IS NOT NULL
+	GROUP BY
+		participant.match_id,
+		participant.match_participant_id,
+		participant.champion_id,
+		participant.champion_name,
+		participant.team_position,
+		participant.kills,
+		participant.deaths,
+		participant.assists,
+		participant.team_id,
+		participant.summoner1_id,
+		participant.summoner2_id,
+		participant.win,
+		participant.enemy_champion_id,
+		participant.enemy_champion_name,
+		participant.enemy_kills,
+		participant.enemy_deaths,
+		participant.enemy_assists,
+		participant.enemy_win,
+		perks.primary_style,
+		perks.primary_perk0,
+		perks.primary_perk1,
+		perks.primary_perk2,
+		perks.primary_perk3,
+		perks.sub_style,
+		perks.sub_perk0,
+		perks.sub_perk1,
+		perks.stat_perk_defense,
+		perks.stat_perk_flex,
+		perks.stat_perk_offense
+`
+
+func PrepareChampionDetailStatisticsSource(database db.Context, matchGameVersions []string) error {
 	if len(matchGameVersions) == 0 {
 		return errors.New("match game versions are required")
 	}
-
-	commonSqls := []string{
-		`CREATE TEMPORARY TABLE IF NOT EXISTS RecentParticipants AS
-			SELECT mp.match_id,
-				   mp.match_participant_id,
-				   mp.champion_id,
-				   mp.champion_name,
-				   mp.team_position,
-				   mp.kills,
-				   mp.deaths,
-				   mp.assists,
-				   mp.team_id,
-				   mp.summoner1_id,
-				   mp.summoner2_id,
-				   mp.item0,
-				   mp.item1,
-				   mp.item2,
-				   mp.item3,
-				   mp.item4,
-				   mp.item5,
-				   mp.item6,
-				   mp.win
-			FROM matches m
-			INNER JOIN match_participants mp ON m.match_id = mp.match_id
-			WHERE m.game_version IN ('` + strings.Join(matchGameVersions, `', '`) + `')
-			  AND mp.team_position != '';`,
-		`CREATE INDEX recent_participants_participant_index
-			ON RecentParticipants (match_participant_id);`,
-		`CREATE INDEX recent_participants_match_position_index
-			ON RecentParticipants (match_id, team_position, team_id);`,
-		`CREATE TEMPORARY TABLE IF NOT EXISTS RecentPerkStyles AS
-			SELECT mpps.match_participant_id,
-				   mpps.style_id,
-				   mpps.description,
-				   mpps.style
-			FROM match_participant_perk_styles mpps
-			INNER JOIN RecentParticipants rp
-				ON mpps.match_participant_id = rp.match_participant_id;`,
-		`CREATE INDEX recent_perk_styles_style_index
-			ON RecentPerkStyles (style_id);`,
-		`CREATE INDEX recent_perk_styles_participant_index
-			ON RecentPerkStyles (match_participant_id);`,
-		`CREATE TEMPORARY TABLE IF NOT EXISTS SortedPerks AS
-			SELECT rps.style_id,
-				   selection.perk,
-				   ROW_NUMBER() OVER (PARTITION BY rps.style_id ORDER BY selection.perk DESC) AS perk_rank
-			FROM RecentPerkStyles rps
-			INNER JOIN match_participant_perk_style_selections selection
-				ON rps.style_id = selection.style_id;`,
-		`CREATE INDEX sorted_perks_style_index
-			ON SortedPerks (style_id, perk_rank);`,
-		`CREATE TEMPORARY TABLE IF NOT EXISTS PerkGroups AS
-			SELECT rps.match_participant_id, rps.style_id,
-				   MAX(CASE WHEN sp.perk_rank = 1 THEN sp.perk END) AS perk0,
-				   MAX(CASE WHEN sp.perk_rank = 2 THEN sp.perk END) AS perk1,
-				   MAX(CASE WHEN sp.perk_rank = 3 THEN sp.perk END) AS perk2,
-				   MAX(CASE WHEN sp.perk_rank = 4 THEN sp.perk END) AS perk3
-			FROM RecentPerkStyles rps
-			LEFT JOIN SortedPerks sp ON rps.style_id = sp.style_id
-			GROUP BY rps.match_participant_id, rps.style_id;`,
-		`CREATE INDEX perk_groups_participant_style_index
-			ON PerkGroups (match_participant_id, style_id);`,
-		`CREATE TEMPORARY TABLE IF NOT EXISTS PerkStyleGroups AS
-			SELECT rps.match_participant_id,
-				   MAX(CASE WHEN rps.description = 'primaryStyle' THEN rps.style END) AS primary_style,
-				   MAX(CASE WHEN rps.description = 'primaryStyle' THEN pg.perk0 END) AS primary_perk0,
-				   MAX(CASE WHEN rps.description = 'primaryStyle' THEN pg.perk1 END) AS primary_perk1,
-				   MAX(CASE WHEN rps.description = 'primaryStyle' THEN pg.perk2 END) AS primary_perk2,
-				   MAX(CASE WHEN rps.description = 'primaryStyle' THEN pg.perk3 END) AS primary_perk3,
-				   MAX(CASE WHEN rps.description = 'subStyle' THEN rps.style END) AS sub_style,
-				   MAX(CASE WHEN rps.description = 'subStyle' THEN pg.perk0 END) AS sub_perk0,
-				   MAX(CASE WHEN rps.description = 'subStyle' THEN pg.perk1 END) AS sub_perk1,
-				   mpp.stat_perk_defense,
-				   mpp.stat_perk_flex,
-				   mpp.stat_perk_offense
-			FROM RecentPerkStyles rps
-			LEFT JOIN match_participant_perks mpp ON rps.match_participant_id = mpp.match_participant_id
-			LEFT JOIN PerkGroups pg ON rps.match_participant_id = pg.match_participant_id
-								   AND rps.style_id = pg.style_id
-			GROUP BY rps.match_participant_id;`,
-		`CREATE INDEX perk_style_groups_participant_index
-			ON PerkStyleGroups (match_participant_id);`,
-		`CREATE TEMPORARY TABLE IF NOT EXISTS ItemDetails AS
-			SELECT mp.match_id, mp.match_participant_id, mp.champion_id, mp.champion_name, mp.team_position,
-				   mp.kills, mp.deaths, mp.assists, mp.team_id,
-				   mp.summoner1_id, mp.summoner2_id, si.id AS item_id, si.name AS item_name,
-				   si.gold_total AS gold_value,
-				   pc.primary_style, pc.primary_perk0, pc.primary_perk1, pc.primary_perk2, pc.primary_perk3,
-				   pc.sub_style, pc.sub_perk0, pc.sub_perk1,
-				   pc.stat_perk_defense, pc.stat_perk_flex, pc.stat_perk_offense,
-				   mp.win,
-				   ROW_NUMBER() OVER (PARTITION BY mp.match_id, mp.match_participant_id ORDER BY si.depth DESC, si.gold_total DESC) AS item_rank
-			FROM RecentParticipants mp
-			JOIN static_items si ON si.id IN (mp.item0, mp.item1, mp.item2, mp.item3, mp.item4, mp.item5, mp.item6)
-			LEFT JOIN PerkStyleGroups pc ON mp.match_participant_id = pc.match_participant_id
-			WHERE si.id IS NOT NULL
-			  AND si.id != 0
-			  AND si.required_ally IS NULL
-			  AND si.gold_purchasable IS TRUE
-			  AND si.gold_total > 0
-			  AND si.depth >= 3
-			  AND mp.team_position != ''
-			  AND pc.primary_style IS NOT NULL
-			  AND pc.sub_style IS NOT NULL
-			  AND pc.primary_style != 0
-		  	  AND pc.primary_perk1 IS NOT NULL
-			  AND pc.primary_perk2 IS NOT NULL
-			  AND pc.primary_perk3 IS NOT NULL
-			  AND pc.sub_style != 0
-			  AND pc.sub_perk0 IS NOT NULL
-			  AND pc.sub_perk1 IS NOT NULL;`,
-		`CREATE TEMPORARY TABLE IF NOT EXISTS MainGroup AS
-			SELECT match_id, match_participant_id, champion_id, champion_name, team_position,
-				   kills, deaths, assists, win, team_id,
-				   summoner1_id, summoner2_id, primary_style, primary_perk0, primary_perk1, primary_perk2, primary_perk3,
-				   sub_style, sub_perk0, sub_perk1, stat_perk_defense, stat_perk_flex, stat_perk_offense,
-				   MAX(CASE WHEN item_rank = 1 THEN item_id END) AS item0_id,
-				   MAX(CASE WHEN item_rank = 1 THEN item_name END) AS item0_name,
-				   MAX(CASE WHEN item_rank = 2 THEN item_id END) AS item1_id,
-				   MAX(CASE WHEN item_rank = 2 THEN item_name END) AS item1_name,
-				   MAX(CASE WHEN item_rank = 3 THEN item_id END) AS item2_id,
-				   MAX(CASE WHEN item_rank = 3 THEN item_name END) AS item2_name,
-				   MAX(CASE WHEN item_rank = 4 THEN item_id END) AS item3_id,
-				   MAX(CASE WHEN item_rank = 4 THEN item_name END) AS item3_name,
-				   MAX(CASE WHEN item_rank = 5 THEN item_id END) AS item4_id,
-				   MAX(CASE WHEN item_rank = 5 THEN item_name END) AS item4_name,
-				   MAX(CASE WHEN item_rank = 6 THEN item_id END) AS item5_id,
-				   MAX(CASE WHEN item_rank = 6 THEN item_name END) AS item5_name
-			FROM ItemDetails
-			GROUP BY match_id, match_participant_id, champion_id, champion_name, team_position,
-					 kills, deaths, assists, win, team_id,
-					 primary_style, sub_style, summoner1_id, summoner2_id,
-					 primary_perk0, primary_perk1, primary_perk2, primary_perk3,
-					 sub_perk0, sub_perk1, stat_perk_defense, stat_perk_flex, stat_perk_offense;`,
+	started := time.Now()
+	if _, err := database.Exec("TRUNCATE TABLE " + championDetailStatisticsSourceTable); err != nil {
+		return fmt.Errorf("truncate champion detail statistics source: %w", err)
 	}
-	metaSqls := []string{
-		`CREATE TEMPORARY TABLE IF NOT EXISTS SummonerSpellCounts AS 
-			SELECT champion_id, team_position, primary_style, sub_style, summoner1_id, summoner2_id, COUNT(*) AS count
-			FROM MainGroup
-			GROUP BY champion_id, team_position, primary_style, sub_style, summoner1_id, summoner2_id;`,
-		`CREATE TEMPORARY TABLE IF NOT EXISTS SummonerSpellRanks AS 
-			SELECT *, ROW_NUMBER() OVER (PARTITION BY champion_id, team_position, primary_style, sub_style ORDER BY count DESC) AS spell_rank
-			FROM SummonerSpellCounts;`,
-		`CREATE TEMPORARY TABLE IF NOT EXISTS PerkCounts AS 
-			SELECT champion_id, team_position, primary_style, sub_style, primary_perk0, primary_perk1, primary_perk2, primary_perk3, 
-				   sub_perk0, sub_perk1, stat_perk_defense, stat_perk_flex, stat_perk_offense, COUNT(*) AS count
-			FROM MainGroup
-			GROUP BY champion_id, team_position, primary_style, sub_style, primary_perk0, primary_perk1, primary_perk2, primary_perk3, 
-					 sub_perk0, sub_perk1, stat_perk_defense, stat_perk_flex, stat_perk_offense;`,
-		`CREATE TEMPORARY TABLE IF NOT EXISTS PerkRanks AS 
-			SELECT *, ROW_NUMBER() OVER (PARTITION BY champion_id, team_position, primary_style, sub_style ORDER BY count DESC) AS perk_rank
-			FROM PerkCounts;`,
-		`CREATE TEMPORARY TABLE IF NOT EXISTS FullItemTreeGroups AS 
-			SELECT champion_id, champion_name, team_position, primary_style, sub_style, 
-				   item0_id, item1_id, item2_id, item3_id, item4_id, item5_id,
-				   item0_name, item1_name, item2_name, item3_name, item4_name, item5_name,
-				   IF(item0_id IS NOT NULL, 1, 0) 
-					   + IF(item1_id IS NOT NULL, 1, 0) 
-					   + IF(item2_id IS NOT NULL, 1, 0) 
-					   + IF(item3_id IS NOT NULL, 1, 0) 
-					   + IF(item4_id IS NOT NULL, 1, 0) 
-					   + IF(item5_id IS NOT NULL, 1, 0) 
-				   AS item_count, 
-				   COUNT(*) AS full_item_tree_count
-			FROM MainGroup
-			WHERE item0_id IS NOT NULL AND item1_id IS NOT NULL AND item2_id IS NOT NULL
-			GROUP BY champion_id, champion_name, team_position, primary_style, sub_style, 
-					 item0_id, item1_id, item2_id, item3_id, item4_id, item5_id, 
-					 item0_name, item1_name, item2_name, item3_name, item4_name, item5_name;`,
-		`CREATE TEMPORARY TABLE IF NOT EXISTS FullItemTreeRanks AS 
-			SELECT *, ROW_NUMBER() OVER (PARTITION BY champion_id, champion_name, team_position, primary_style, sub_style, item0_id, item1_id, item2_id ORDER BY item_count DESC, full_item_tree_count DESC) AS item_combo_rank
-			FROM FullItemTreeGroups;`,
-		`CREATE TEMPORARY TABLE IF NOT EXISTS RefinedMetaGroups AS 
-			SELECT champion_id, champion_name, team_position, primary_style, sub_style, item0_id, item1_id, item2_id, SUM(win) AS wins, COUNT(*) AS total, AVG(win) AS win_rate
-			FROM MainGroup
-			WHERE item0_id IS NOT NULL AND item1_id IS NOT NULL AND item2_id IS NOT NULL
-			GROUP BY champion_id, champion_name, team_position, primary_style, sub_style, item0_id, item1_id, item2_id;`,
-		`CREATE TEMPORARY TABLE IF NOT EXISTS RankedMetas AS 
-			SELECT *, ROW_NUMBER() OVER (PARTITION BY champion_id, champion_name, team_position ORDER BY total DESC, win_rate DESC) AS meta_rank
-			FROM RefinedMetaGroups;`,
-		`CREATE TEMPORARY TABLE IF NOT EXISTS FinalRankedMetas AS 
-			SELECT rm.*, fitr.item3_id, fitr.item4_id, fitr.item5_id, fitr.item3_name, fitr.item4_name, fitr.item5_name, 
-				mss.summoner1_id, mss.summoner2_id, 
-				pr.primary_perk0, pr.primary_perk1, pr.primary_perk2, pr.primary_perk3, 
-				pr.sub_perk0, pr.sub_perk1, pr.stat_perk_defense, pr.stat_perk_flex, pr.stat_perk_offense
-			FROM RankedMetas rm
-			LEFT JOIN FullItemTreeRanks fitr ON rm.champion_id = fitr.champion_id 
-				AND rm.champion_name = fitr.champion_name 
-				AND rm.team_position = fitr.team_position 
-				AND rm.primary_style = fitr.primary_style 
-				AND rm.sub_style = fitr.sub_style 
-				AND rm.item0_id = fitr.item0_id 
-				AND rm.item1_id = fitr.item1_id 
-				AND rm.item2_id = fitr.item2_id
-				AND fitr.item_combo_rank = 1
-			LEFT JOIN SummonerSpellRanks mss ON rm.champion_id = mss.champion_id 
-				AND rm.team_position = mss.team_position 
-				AND rm.primary_style = mss.primary_style 
-				AND rm.sub_style = mss.sub_style 
-				AND mss.spell_rank = 1
-			LEFT JOIN PerkRanks pr ON rm.champion_id = pr.champion_id 
-				AND rm.team_position = pr.team_position 
-				AND rm.primary_style = pr.primary_style 
-				AND rm.sub_style = pr.sub_style AND pr.perk_rank = 1;`,
+	query, args, err := sqlx.In(createRecentChampionBuildsQuery, matchGameVersions)
+	if err != nil {
+		return fmt.Errorf("bind recent champion build versions: %w", err)
 	}
-	counterSqls := []string{
-		`CREATE TEMPORARY TABLE IF NOT EXISTS CounterGroup AS
-			SELECT mg.match_id,
-				   mg.team_position,
-				   mg.champion_id,
-				   mg.champion_name,
-				   mg.summoner1_id,
-				   mg.summoner2_id,
-				   mg.primary_style,
-				   mg.primary_perk0,
-				   mg.primary_perk1,
-				   mg.primary_perk2,
-				   mg.primary_perk3,
-				   mg.sub_style,
-				   mg.sub_perk0,
-				   mg.sub_perk1,
-				   mg.stat_perk_defense,
-				   mg.stat_perk_flex,
-				   mg.stat_perk_offense,
-				   mg.item0_id,
-				   mg.item1_id,
-				   mg.item2_id,
-				   mg.item3_id,
-				   mg.item4_id,
-				   mg.item5_id,
-				   mg.item0_name,
-				   mg.item1_name,
-				   mg.item2_name,
-				   mg.item3_name,
-				   mg.item4_name,
-				   mg.item5_name,
-				   mg.kills AS my_kills,
-				   mg.deaths AS my_deaths,
-				   mg.assists AS my_assists,
-				   mg.win AS my_win,
-				   emp.champion_id AS enemy_champion_id,
-				   emp.champion_name AS enemy_champion_name,
-				   emp.kills AS enemy_kills,
-				   emp.deaths AS enemy_deaths,
-				   emp.assists AS enemy_assists,
-				   emp.win AS enemy_win
-			FROM MainGroup mg
-			LEFT JOIN RecentParticipants emp ON mg.match_id = emp.match_id
-											 AND mg.team_id != emp.team_id
-											 AND mg.team_position = emp.team_position
-			WHERE emp.team_position != ''
-			  AND emp.team_position IS NOT NULL;`,
-		`CREATE TEMPORARY TABLE IF NOT EXISTS CounterSummonerSpellCounts AS
-			SELECT champion_id, enemy_champion_id, team_position, primary_style, sub_style, summoner1_id, summoner2_id, COUNT(*) AS count, AVG(my_win) AS win_rate
-			FROM CounterGroup cg
-			GROUP BY champion_id, enemy_champion_id, team_position, primary_style, sub_style, summoner1_id, summoner2_id;`,
-		`CREATE TEMPORARY TABLE IF NOT EXISTS CounterSummonerSpellRanks AS
-			SELECT *, ROW_NUMBER() OVER (PARTITION BY champion_id, enemy_champion_id, team_position ORDER BY count DESC, win_rate DESC) AS spell_rank
-			FROM CounterSummonerSpellCounts;`,
-		`CREATE TEMPORARY TABLE IF NOT EXISTS CounterPerkCounts AS
-			SELECT champion_id, enemy_champion_id, team_position, primary_style, sub_style, primary_perk0, primary_perk1, primary_perk2, primary_perk3,
-				   sub_perk0, sub_perk1, stat_perk_defense, stat_perk_flex, stat_perk_offense, COUNT(*) AS count, AVG(my_win) AS win_rate
-			FROM CounterGroup
-			GROUP BY champion_id, enemy_champion_id, team_position, primary_style, sub_style, primary_perk0, primary_perk1, primary_perk2, primary_perk3,
-					 sub_perk0, sub_perk1, stat_perk_defense, stat_perk_flex, stat_perk_offense;`,
-		`CREATE TEMPORARY TABLE IF NOT EXISTS CounterPerkRanks AS
-			SELECT *, ROW_NUMBER() OVER (PARTITION BY champion_id, enemy_champion_id, team_position ORDER BY count DESC, win_rate DESC) AS perk_rank
-			FROM CounterPerkCounts;`,
-		`CREATE TEMPORARY TABLE IF NOT EXISTS CounterFullItemTreeGroups AS
-			SELECT champion_id, enemy_champion_id, champion_name, team_position, primary_style, sub_style,
-				   item0_id, item1_id, item2_id, item3_id, item4_id, item5_id,
-				   item0_name, item1_name, item2_name, item3_name, item4_name, item5_name,
-				   IF(item0_id IS NOT NULL, 1, 0)
-					   + IF(item1_id IS NOT NULL, 1, 0)
-					   + IF(item2_id IS NOT NULL, 1, 0)
-					   + IF(item3_id IS NOT NULL, 1, 0)
-					   + IF(item4_id IS NOT NULL, 1, 0)
-					   + IF(item5_id IS NOT NULL, 1, 0)
-				   AS item_count,
-			        AVG(my_win) AS win_rate,
-				   COUNT(*) AS full_item_tree_count
-			FROM CounterGroup
-			WHERE item0_id IS NOT NULL AND item1_id IS NOT NULL AND item2_id IS NOT NULL
-			GROUP BY champion_id, enemy_champion_id, champion_name, team_position, primary_style, sub_style,
-					 item0_id, item1_id, item2_id, item3_id, item4_id, item5_id,
-					 item0_name, item1_name, item2_name, item3_name, item4_name, item5_name;`,
-		`CREATE TEMPORARY TABLE IF NOT EXISTS CounterFullItemTreeRanks AS
-			SELECT *, ROW_NUMBER() OVER (PARTITION BY champion_id, enemy_champion_id, team_position ORDER BY item_count DESC, full_item_tree_count DESC) AS item_combo_rank
-			FROM CounterFullItemTreeGroups;`,
-		`CREATE TEMPORARY TABLE IF NOT EXISTS CounterMetaGroup AS
-			SELECT cg.champion_id,
-				   cg.champion_name,
-				   cg.team_position,
-				   cg.enemy_champion_id,
-				   cg.enemy_champion_name,
-				   AVG(cg.my_kills) AS avg_kills,
-				   AVG(cg.my_deaths) AS avg_deaths,
-				   AVG(cg.my_assists) AS avg_assists,
-				   SUM(cg.my_win) AS wins,
-				   AVG(cg.my_win) AS win_rate,
-				   AVG(cg.enemy_kills) AS avg_enemy_kills,
-				   AVG(cg.enemy_deaths) AS avg_enemy_deaths,
-				   AVG(cg.enemy_assists) AS avg_enemy_assists,
-				   SUM(cg.enemy_win) AS enemy_wins,
-				   AVG(cg.enemy_win) AS enemy_win_rate,
-				   COUNT(DISTINCT cg.match_id) AS total
-			FROM CounterGroup cg
-			GROUP BY cg.champion_id, cg.champion_name, cg.team_position, cg.enemy_champion_id, cg.enemy_champion_name;`,
+	if _, err := database.Exec(database.Rebind(query), args...); err != nil {
+		return fmt.Errorf("populate champion detail statistics source: %w", err)
 	}
-
-	totalSqls := append(commonSqls, append(metaSqls, counterSqls...)...)
-	index := 0
-	for _, totalSql := range totalSqls {
-		splited := strings.Split(totalSql, " ")
-		tableName := "unknown"
-		if len(splited) > 6 {
-			tableName = splited[6]
-		}
-
-		if _, err := db.Exec(totalSql); err != nil {
-			log.Errorf("error occurred while creating %s", tableName)
-			log.Error(err)
-			return err
-		}
-
-		index += 1
-		log.Debugf("champion detail statistics meta CTT process: %d/%d (%s) complete", index, len(totalSqls), tableName)
+	var rowCount int64
+	if err := database.Get(&rowCount, "SELECT COUNT(*) FROM "+championDetailStatisticsSourceTable); err != nil {
+		return fmt.Errorf("count champion detail statistics source: %w", err)
 	}
-
+	log.Infof(
+		"champion detail filtered source ready: patches=%d rows=%d staging_tables=1 duration=%s",
+		len(matchGameVersions), rowCount, time.Since(started),
+	)
 	return nil
 }
 
-func DropTemporaryTables(db db.Context) error {
-	droppingTables := []string{
-		"RecentParticipants",
-		"RecentPerkStyles",
-		"SortedPerks",
-		"PerkGroups",
-		"PerkStyleGroups",
-		"ItemDetails",
-		"MainGroup",
-		"SummonerSpellCounts",
-		"SummonerSpellRanks",
-		"PerkCounts",
-		"PerkRanks",
-		"FullItemTreeGroups",
-		"FullItemTreeRanks",
-		"RefinedMetaGroups",
-		"RankedMetas",
-		"FinalRankedMetas",
-		"CounterGroup",
-		"CounterSummonerSpellCounts",
-		"CounterSummonerSpellRanks",
-		"CounterPerkCounts",
-		"CounterPerkRanks",
-		"CounterFullItemTreeGroups",
-		"CounterFullItemTreeRanks",
-		"CounterMetaGroup",
-	}
+const championDetailMetaQuery = `
+	WITH SummonerSpellCounts AS (
+		SELECT champion_id, team_position, primary_style, sub_style,
+			summoner1_id, summoner2_id, COUNT(*) AS count
+		FROM champion_detail_statistics_source
+		GROUP BY champion_id, team_position, primary_style, sub_style, summoner1_id, summoner2_id
+	), SummonerSpellRanks AS (
+		SELECT *, ROW_NUMBER() OVER (
+			PARTITION BY champion_id, team_position, primary_style, sub_style
+			ORDER BY count DESC
+		) AS spell_rank
+		FROM SummonerSpellCounts
+	), PerkCounts AS (
+		SELECT champion_id, team_position, primary_style, sub_style,
+			primary_perk0, primary_perk1, primary_perk2, primary_perk3,
+			sub_perk0, sub_perk1, stat_perk_defense, stat_perk_flex, stat_perk_offense,
+			COUNT(*) AS count
+		FROM champion_detail_statistics_source
+		GROUP BY champion_id, team_position, primary_style, sub_style,
+			primary_perk0, primary_perk1, primary_perk2, primary_perk3,
+			sub_perk0, sub_perk1, stat_perk_defense, stat_perk_flex, stat_perk_offense
+	), PerkRanks AS (
+		SELECT *, ROW_NUMBER() OVER (
+			PARTITION BY champion_id, team_position, primary_style, sub_style
+			ORDER BY count DESC
+		) AS perk_rank
+		FROM PerkCounts
+	), FullItemTreeGroups AS (
+		SELECT champion_id, champion_name, team_position, primary_style, sub_style,
+			item0_id, item1_id, item2_id, item3_id, item4_id, item5_id,
+			item0_name, item1_name, item2_name, item3_name, item4_name, item5_name,
+			(item0_id IS NOT NULL) + (item1_id IS NOT NULL) + (item2_id IS NOT NULL)
+				+ (item3_id IS NOT NULL) + (item4_id IS NOT NULL) + (item5_id IS NOT NULL) AS item_count,
+			COUNT(*) AS full_item_tree_count
+		FROM champion_detail_statistics_source
+		WHERE item0_id IS NOT NULL AND item1_id IS NOT NULL AND item2_id IS NOT NULL
+		GROUP BY champion_id, champion_name, team_position, primary_style, sub_style,
+			item0_id, item1_id, item2_id, item3_id, item4_id, item5_id,
+			item0_name, item1_name, item2_name, item3_name, item4_name, item5_name
+	), FullItemTreeRanks AS (
+		SELECT *, ROW_NUMBER() OVER (
+			PARTITION BY champion_id, champion_name, team_position, primary_style, sub_style,
+				item0_id, item1_id, item2_id
+			ORDER BY item_count DESC, full_item_tree_count DESC
+		) AS item_combo_rank
+		FROM FullItemTreeGroups
+	), RefinedMetaGroups AS (
+		SELECT champion_id, champion_name, team_position, primary_style, sub_style,
+			item0_id, item1_id, item2_id, SUM(win) AS wins, COUNT(*) AS total, AVG(win) AS win_rate
+		FROM champion_detail_statistics_source
+		WHERE item0_id IS NOT NULL AND item1_id IS NOT NULL AND item2_id IS NOT NULL
+		GROUP BY champion_id, champion_name, team_position, primary_style, sub_style,
+			item0_id, item1_id, item2_id
+	), RankedMetas AS (
+		SELECT *, ROW_NUMBER() OVER (
+			PARTITION BY champion_id, champion_name, team_position
+			ORDER BY total DESC, win_rate DESC
+		) AS meta_rank
+		FROM RefinedMetaGroups
+	)
+	SELECT
+		ranked.champion_id, ranked.champion_name, ranked.team_position,
+		ranked.primary_style, perks.primary_perk0, perks.primary_perk1,
+		perks.primary_perk2, perks.primary_perk3,
+		ranked.sub_style, perks.sub_perk0, perks.sub_perk1,
+		perks.stat_perk_defense, perks.stat_perk_flex, perks.stat_perk_offense,
+		spells.summoner1_id, spells.summoner2_id,
+		ranked.item0_id, ranked.item1_id, ranked.item2_id,
+		items.item3_id, items.item4_id, items.item5_id,
+		items.item0_name, items.item1_name, items.item2_name,
+		items.item3_name, items.item4_name, items.item5_name,
+		ranked.wins, ranked.total, ranked.win_rate, ranked.meta_rank
+	FROM RankedMetas ranked
+	LEFT JOIN FullItemTreeRanks items
+		ON ranked.champion_id = items.champion_id
+		AND ranked.champion_name = items.champion_name
+		AND ranked.team_position = items.team_position
+		AND ranked.primary_style = items.primary_style
+		AND ranked.sub_style = items.sub_style
+		AND ranked.item0_id = items.item0_id
+		AND ranked.item1_id = items.item1_id
+		AND ranked.item2_id = items.item2_id
+		AND items.item_combo_rank = 1
+	LEFT JOIN SummonerSpellRanks spells
+		ON ranked.champion_id = spells.champion_id
+		AND ranked.team_position = spells.team_position
+		AND ranked.primary_style = spells.primary_style
+		AND ranked.sub_style = spells.sub_style
+		AND spells.spell_rank = 1
+	LEFT JOIN PerkRanks perks
+		ON ranked.champion_id = perks.champion_id
+		AND ranked.team_position = perks.team_position
+		AND ranked.primary_style = perks.primary_style
+		AND ranked.sub_style = perks.sub_style
+		AND perks.perk_rank = 1
+	WHERE ranked.meta_rank <= 15 OR (ranked.win_rate > 0.5 AND ranked.total >= 50)
+	ORDER BY ranked.champion_name, ranked.team_position, ranked.meta_rank
+`
 
-	dropped := 0
-	for _, tableName := range droppingTables {
-		result, err := db.Exec("DROP TEMPORARY TABLE IF EXISTS " + tableName + ";")
-		if err != nil {
-			log.Errorf("error occurred while dropping %s", tableName)
-			log.Error(err)
-			return err
-		}
-		affected, _ := result.RowsAffected()
-		if affected > 0 {
-			dropped += 1
-		}
-	}
-
-	log.Debugf("dropped %d temporary tables", len(droppingTables))
-	return nil
-}
+const championCounterQuery = `
+	WITH CounterSummonerSpellCounts AS (
+		SELECT champion_id, enemy_champion_id, team_position, primary_style, sub_style,
+			summoner1_id, summoner2_id, COUNT(*) AS count, AVG(win) AS win_rate
+		FROM champion_detail_statistics_source
+		WHERE enemy_champion_id IS NOT NULL
+		GROUP BY champion_id, enemy_champion_id, team_position, primary_style, sub_style,
+			summoner1_id, summoner2_id
+	), CounterSummonerSpellRanks AS (
+		SELECT *, ROW_NUMBER() OVER (
+			PARTITION BY champion_id, enemy_champion_id, team_position
+			ORDER BY count DESC, win_rate DESC
+		) AS spell_rank
+		FROM CounterSummonerSpellCounts
+	), CounterPerkCounts AS (
+		SELECT champion_id, enemy_champion_id, team_position, primary_style, sub_style,
+			primary_perk0, primary_perk1, primary_perk2, primary_perk3,
+			sub_perk0, sub_perk1, stat_perk_defense, stat_perk_flex, stat_perk_offense,
+			COUNT(*) AS count, AVG(win) AS win_rate
+		FROM champion_detail_statistics_source
+		WHERE enemy_champion_id IS NOT NULL
+		GROUP BY champion_id, enemy_champion_id, team_position, primary_style, sub_style,
+			primary_perk0, primary_perk1, primary_perk2, primary_perk3,
+			sub_perk0, sub_perk1, stat_perk_defense, stat_perk_flex, stat_perk_offense
+	), CounterPerkRanks AS (
+		SELECT *, ROW_NUMBER() OVER (
+			PARTITION BY champion_id, enemy_champion_id, team_position
+			ORDER BY count DESC, win_rate DESC
+		) AS perk_rank
+		FROM CounterPerkCounts
+	), CounterFullItemTreeGroups AS (
+		SELECT champion_id, enemy_champion_id, team_position,
+			item0_id, item1_id, item2_id, item3_id, item4_id, item5_id,
+			(item0_id IS NOT NULL) + (item1_id IS NOT NULL) + (item2_id IS NOT NULL)
+				+ (item3_id IS NOT NULL) + (item4_id IS NOT NULL) + (item5_id IS NOT NULL) AS item_count,
+			AVG(win) AS win_rate, COUNT(*) AS full_item_tree_count
+		FROM champion_detail_statistics_source
+		WHERE enemy_champion_id IS NOT NULL
+			AND item0_id IS NOT NULL AND item1_id IS NOT NULL AND item2_id IS NOT NULL
+		GROUP BY champion_id, enemy_champion_id, team_position,
+			item0_id, item1_id, item2_id, item3_id, item4_id, item5_id
+	), CounterFullItemTreeRanks AS (
+		SELECT *, ROW_NUMBER() OVER (
+			PARTITION BY champion_id, enemy_champion_id, team_position
+			ORDER BY item_count DESC, full_item_tree_count DESC
+		) AS item_combo_rank
+		FROM CounterFullItemTreeGroups
+	), CounterMetaGroups AS (
+		SELECT champion_id, champion_name, team_position,
+			enemy_champion_id, enemy_champion_name,
+			AVG(kills) AS avg_kills, AVG(deaths) AS avg_deaths, AVG(assists) AS avg_assists,
+			SUM(win) AS wins, AVG(win) AS win_rate,
+			AVG(enemy_kills) AS avg_enemy_kills,
+			AVG(enemy_deaths) AS avg_enemy_deaths,
+			AVG(enemy_assists) AS avg_enemy_assists,
+			SUM(enemy_win) AS enemy_wins, AVG(enemy_win) AS enemy_win_rate,
+			COUNT(DISTINCT match_id) AS total
+		FROM champion_detail_statistics_source
+		WHERE enemy_champion_id IS NOT NULL
+		GROUP BY champion_id, champion_name, team_position,
+			enemy_champion_id, enemy_champion_name
+	)
+	SELECT
+		counter.champion_id, counter.champion_name, counter.team_position,
+		counter.enemy_champion_id, counter.enemy_champion_name, counter.total,
+		counter.avg_kills, counter.avg_deaths, counter.avg_assists,
+		counter.wins, counter.win_rate,
+		counter.avg_enemy_kills, counter.avg_enemy_deaths, counter.avg_enemy_assists,
+		counter.enemy_wins, counter.enemy_win_rate,
+		(spells.win_rate + perks.win_rate + items.win_rate) / 3 AS total_win_rate,
+		spells.summoner1_id, spells.summoner2_id,
+		perks.primary_style, perks.primary_perk0, perks.primary_perk1,
+		perks.primary_perk2, perks.primary_perk3,
+		perks.sub_style, perks.sub_perk0, perks.sub_perk1,
+		perks.stat_perk_defense, perks.stat_perk_flex, perks.stat_perk_offense,
+		items.item0_id, items.item1_id, items.item2_id,
+		items.item3_id, items.item4_id, items.item5_id
+	FROM CounterMetaGroups counter
+	LEFT JOIN CounterFullItemTreeRanks items
+		ON counter.champion_id = items.champion_id
+		AND counter.enemy_champion_id = items.enemy_champion_id
+		AND counter.team_position = items.team_position
+		AND items.item_combo_rank = 1
+	LEFT JOIN CounterSummonerSpellRanks spells
+		ON counter.champion_id = spells.champion_id
+		AND counter.enemy_champion_id = spells.enemy_champion_id
+		AND counter.team_position = spells.team_position
+		AND spells.spell_rank = 1
+	LEFT JOIN CounterPerkRanks perks
+		ON counter.champion_id = perks.champion_id
+		AND counter.enemy_champion_id = perks.enemy_champion_id
+		AND counter.team_position = perks.team_position
+		AND perks.perk_rank = 1
+`
 
 type ChampionDetailStatisticsMetaMXDAO struct {
 	ChampionId   int    `db:"champion_id" json:"championId"`
@@ -432,21 +469,14 @@ type ChampionDetailStatisticsMetaMXDAO struct {
 	MetaRank int `db:"meta_rank" json:"metaRank"`
 }
 
-func GetChampionDetailStatisticsMetaMXDAOs(db db.Context) ([]ChampionDetailStatisticsMetaMXDAO, error) {
+func GetChampionDetailStatisticsMetaMXDAOs(database db.Context) ([]ChampionDetailStatisticsMetaMXDAO, error) {
 	var result []ChampionDetailStatisticsMetaMXDAO
-	if err := db.Select(&result, `
-		SELECT *
-		FROM FinalRankedMetas
-		WHERE meta_rank <= 15 OR (win_rate > 0.5 AND total >= 50)
-		ORDER BY champion_name ASC, team_position ASC, meta_rank ASC;
-	`); err != nil {
+	if err := database.Select(&result, championDetailMetaQuery); err != nil {
 		if errors.Is(sql.ErrNoRows, err) {
-			result = make([]ChampionDetailStatisticsMetaMXDAO, 0)
-		} else {
-			return nil, err
+			return make([]ChampionDetailStatisticsMetaMXDAO, 0), nil
 		}
+		return nil, err
 	}
-
 	return result, nil
 }
 
@@ -496,65 +526,13 @@ type ChampionCounterStatisticsMXDAO struct {
 	EnemyWinRate    *float64 `db:"enemy_win_rate" json:"enemyWinRate"`
 }
 
-func GetChampionCounterStatisticsMXDAOs(db db.Context) ([]ChampionCounterStatisticsMXDAO, error) {
+func GetChampionCounterStatisticsMXDAOs(database db.Context) ([]ChampionCounterStatisticsMXDAO, error) {
 	var result []ChampionCounterStatisticsMXDAO
-	if err := db.Select(&result, `
-		SELECT cmg.champion_id,
-			   cmg.champion_name,
-			   cmg.team_position,
-			   cmg.enemy_champion_id,
-			   cmg.enemy_champion_name,
-			   cmg.total,
-			   cmg.avg_kills,
-			   cmg.avg_deaths,
-			   cmg.avg_assists,
-			   cmg.wins,
-			   cmg.win_rate,
-			   cmg.avg_enemy_kills,
-			   cmg.avg_enemy_deaths,
-			   cmg.avg_enemy_assists,
-			   cmg.enemy_wins,
-			   cmg.enemy_win_rate,
-			   (cssr.win_rate + cpr.win_rate + cfitr.win_rate) / 3 AS total_win_rate,
-			   cssr.summoner1_id,
-			   cssr.summoner2_id,
-			   cpr.primary_style,
-			   cpr.primary_perk0,
-			   cpr.primary_perk1,
-			   cpr.primary_perk2,
-			   cpr.primary_perk3,
-			   cpr.sub_style,
-			   cpr.sub_perk0,
-			   cpr.sub_perk1,
-			   cpr.stat_perk_defense,
-			   cpr.stat_perk_flex,
-			   cpr.stat_perk_offense,
-			   cfitr.item0_id,
-			   cfitr.item1_id,
-			   cfitr.item2_id,
-			   cfitr.item3_id,
-			   cfitr.item4_id,
-			   cfitr.item5_id
-		FROM CounterMetaGroup cmg
-		LEFT JOIN CounterFullItemTreeRanks cfitr ON cmg.champion_id = cfitr.champion_id
-												AND cmg.enemy_champion_id = cfitr.enemy_champion_id
-												AND cmg.team_position = cfitr.team_position
-												AND cfitr.item_combo_rank = 1
-		LEFT JOIN CounterSummonerSpellRanks cssr ON cmg.champion_id = cssr.champion_id
-						AND cmg.enemy_champion_id = cssr.enemy_champion_id
-						AND cmg.team_position = cssr.team_position
-						AND cssr.spell_rank = 1
-		LEFT JOIN CounterPerkRanks cpr ON cmg.champion_id = cpr.champion_id
-									  AND cmg.enemy_champion_id = cpr.enemy_champion_id
-									  AND cmg.team_position = cpr.team_position
-									  AND cpr.perk_rank = 1
-	`); err != nil {
+	if err := database.Select(&result, championCounterQuery); err != nil {
 		if errors.Is(sql.ErrNoRows, err) {
-			result = make([]ChampionCounterStatisticsMXDAO, 0)
-		} else {
-			return nil, err
+			return make([]ChampionCounterStatisticsMXDAO, 0), nil
 		}
+		return nil, err
 	}
-
 	return result, nil
 }

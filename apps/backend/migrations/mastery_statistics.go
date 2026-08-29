@@ -1,0 +1,174 @@
+package migrations
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+
+	"github.com/jmoiron/sqlx"
+)
+
+const (
+	masteryStatisticsCoveringIndex = "masteries_champion_points_level_covering_index"
+	masteryStatisticsInsertTrigger = "teamgg_masteries_statistics_insert"
+	masteryStatisticsUpdateTrigger = "teamgg_masteries_statistics_update"
+	masteryStatisticsDeleteTrigger = "teamgg_masteries_statistics_delete"
+)
+
+func applyMasteryStatisticsAggregates(ctx context.Context, database *sqlx.DB) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS mastery_statistics_aggregates (
+			champion_id BIGINT NOT NULL,
+			max_mastery BIGINT NOT NULL,
+			total_mastery BIGINT NOT NULL,
+			mastered_count BIGINT NOT NULL,
+			summoner_count BIGINT NOT NULL,
+			updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+			PRIMARY KEY (champion_id),
+			KEY mastery_statistics_aggregates_updated_index (updated_at)
+		) ENGINE=InnoDB`,
+		`CREATE TABLE IF NOT EXISTS mastery_statistics_dirty_champions (
+			champion_id BIGINT NOT NULL,
+			dirty_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+			PRIMARY KEY (champion_id),
+			KEY mastery_statistics_dirty_at_index (dirty_at, champion_id)
+		) ENGINE=InnoDB`,
+	}
+	for _, statement := range statements {
+		if _, err := database.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	if err := ensureMasteryStatisticsCoveringIndex(ctx, database); err != nil {
+		return fmt.Errorf("ensure mastery statistics covering index: %w", err)
+	}
+
+	triggers := []struct {
+		name, timing, event, statement string
+	}{
+		{
+			masteryStatisticsInsertTrigger, "AFTER", "INSERT",
+			fmt.Sprintf(`CREATE TRIGGER %s AFTER INSERT ON masteries FOR EACH ROW
+				INSERT INTO mastery_statistics_dirty_champions (champion_id, dirty_at)
+				VALUES (NEW.champion_id, NOW(6))
+				ON DUPLICATE KEY UPDATE dirty_at = VALUES(dirty_at)`, masteryStatisticsInsertTrigger),
+		},
+		{
+			masteryStatisticsUpdateTrigger, "AFTER", "UPDATE",
+			fmt.Sprintf(`CREATE TRIGGER %s AFTER UPDATE ON masteries FOR EACH ROW
+				INSERT INTO mastery_statistics_dirty_champions (champion_id, dirty_at)
+				SELECT NEW.champion_id, NOW(6) FROM DUAL
+				WHERE NOT (OLD.champion_points <=> NEW.champion_points)
+				   OR NOT (OLD.champion_level <=> NEW.champion_level)
+				ON DUPLICATE KEY UPDATE dirty_at = VALUES(dirty_at)`, masteryStatisticsUpdateTrigger),
+		},
+		{
+			masteryStatisticsDeleteTrigger, "AFTER", "DELETE",
+			fmt.Sprintf(`CREATE TRIGGER %s AFTER DELETE ON masteries FOR EACH ROW
+				INSERT INTO mastery_statistics_dirty_champions (champion_id, dirty_at)
+				VALUES (OLD.champion_id, NOW(6))
+				ON DUPLICATE KEY UPDATE dirty_at = VALUES(dirty_at)`, masteryStatisticsDeleteTrigger),
+		},
+	}
+	for _, trigger := range triggers {
+		if err := ensureMasteryStatisticsTrigger(ctx, database, trigger.name, trigger.timing, trigger.event, trigger.statement); err != nil {
+			return err
+		}
+	}
+	_, err := database.ExecContext(ctx, `
+		INSERT INTO mastery_statistics_dirty_champions (champion_id, dirty_at)
+		SELECT DISTINCT champion_id, NOW(6)
+		FROM masteries
+		ON DUPLICATE KEY UPDATE dirty_at = LEAST(dirty_at, VALUES(dirty_at))
+	`)
+	return err
+}
+
+func ensureMasteryStatisticsCoveringIndex(ctx context.Context, database *sqlx.DB) error {
+	expected := []string{"champion_id", "champion_points", "champion_level"}
+	valid, err := indexMatches(ctx, database, "masteries", masteryStatisticsCoveringIndex, expected...)
+	if err != nil {
+		return err
+	}
+	if valid {
+		return nil
+	}
+	existing, err := indexColumns(ctx, database, "masteries", masteryStatisticsCoveringIndex)
+	if err != nil {
+		return err
+	}
+	if len(existing) > 0 {
+		return fmt.Errorf(
+			"index masteries.%s exists with columns %v, expected %v",
+			masteryStatisticsCoveringIndex,
+			existing,
+			expected,
+		)
+	}
+	_, err = database.ExecContext(ctx, `
+		ALTER TABLE masteries
+		ADD INDEX masteries_champion_points_level_covering_index
+			(champion_id ASC, champion_points DESC, champion_level),
+		ALGORITHM=INPLACE,
+		LOCK=NONE
+	`)
+	return err
+}
+
+func ensureMasteryStatisticsTrigger(ctx context.Context, database *sqlx.DB, name, timing, event, statement string) error {
+	var existing struct {
+		Table  string `db:"event_object_table"`
+		Timing string `db:"action_timing"`
+		Event  string `db:"event_manipulation"`
+	}
+	err := database.GetContext(ctx, &existing, `
+		SELECT event_object_table, action_timing, event_manipulation
+		FROM information_schema.triggers
+		WHERE trigger_schema = DATABASE() AND trigger_name = ?
+	`, name)
+	if err == nil {
+		if existing.Table == "masteries" && existing.Timing == timing && existing.Event == event {
+			return nil
+		}
+		return fmt.Errorf("trigger %s exists with an unexpected definition", name)
+	}
+	if err != sql.ErrNoRows {
+		return err
+	}
+	if _, err := database.ExecContext(ctx, statement); err != nil {
+		return fmt.Errorf("create trigger %s: %w", name, err)
+	}
+	return nil
+}
+
+func validateMasteryStatisticsAggregates(ctx context.Context, database *sqlx.DB) (bool, error) {
+	tables, err := tablesExist(ctx, database, "mastery_statistics_aggregates", "mastery_statistics_dirty_champions")
+	if err != nil || !tables {
+		return false, err
+	}
+	index, err := indexMatches(
+		ctx,
+		database,
+		"masteries",
+		masteryStatisticsCoveringIndex,
+		"champion_id",
+		"champion_points",
+		"champion_level",
+	)
+	if err != nil || !index {
+		return false, err
+	}
+	for _, name := range []string{masteryStatisticsInsertTrigger, masteryStatisticsUpdateTrigger, masteryStatisticsDeleteTrigger} {
+		var count int
+		if err := database.GetContext(ctx, &count, `
+			SELECT COUNT(*) FROM information_schema.triggers
+			WHERE trigger_schema = DATABASE() AND trigger_name = ? AND event_object_table = 'masteries'
+		`, name); err != nil {
+			return false, err
+		}
+		if count != 1 {
+			return false, nil
+		}
+	}
+	return true, nil
+}

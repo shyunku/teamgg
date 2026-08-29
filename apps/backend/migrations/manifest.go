@@ -98,6 +98,18 @@ func migrationDefinitions() []Definition {
 				return tablesExist(ctx, database, "data_explorer_metrics_daily")
 			},
 		},
+		{
+			Version:  "20260830_001",
+			FileName: "20260830_add_incremental_mastery_statistics.sql",
+			Apply:    applyMasteryStatisticsAggregates,
+			Validate: validateMasteryStatisticsAggregates,
+		},
+		{
+			Version:  "20260830_002",
+			FileName: "20260830_create_champion_detail_statistics_source.sql",
+			Apply:    applyChampionDetailStatisticsSource,
+			Validate: validateChampionDetailStatisticsSource,
+		},
 	}
 }
 

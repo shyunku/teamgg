@@ -293,19 +293,14 @@ func (cdsr *ChampionDetailStatisticsRepository) collect(database db.Context) (*C
 		}
 	}
 
-	if err := statistics_models.CreateTemporaryTables(database, recentMatchGameVersions); err != nil {
+	if err := statistics_models.PrepareChampionDetailStatisticsSource(database, recentMatchGameVersions); err != nil {
 		log.Error(err)
 		return nil, err
 	}
-	defer func(db db.Context) {
-		err := statistics_models.DropTemporaryTables(db)
-		if err != nil {
-			log.Error(err)
-		}
-	}(database)
 
 	// collect meta
 	championDetailStatisticsMetaMap := make(map[int][]statistics_models.ChampionDetailStatisticsMetaMXDAO)
+	metaStarted := time.Now()
 	championDetailStatisticsMetaMXDAOs, err := statistics_models.GetChampionDetailStatisticsMetaMXDAOs(database)
 	if err != nil {
 		log.Error(err)
@@ -318,11 +313,14 @@ func (cdsr *ChampionDetailStatisticsRepository) collect(database db.Context) (*C
 		}
 		championDetailStatisticsMetaMap[championId] = append(championDetailStatisticsMetaMap[championId], meta)
 	}
+	log.Infof("champion detail meta query complete: rows=%d duration=%s",
+		len(championDetailStatisticsMetaMXDAOs), time.Since(metaStarted))
 	log.Debugf("championDetailStatisticsMetaMXDAOs fetch complete: %d, size: %s",
 		len(championDetailStatisticsMetaMXDAOs), util.MemorySizeOfArray(championDetailStatisticsMetaMXDAOs))
 
 	// collect counter data
 	championCounterStatisticsMap := make(map[int][]statistics_models.ChampionCounterStatisticsMXDAO) // key: championId
+	counterStarted := time.Now()
 	championCounterStatisticsMXDAOs, err := statistics_models.GetChampionCounterStatisticsMXDAOs(database)
 	if err != nil {
 		log.Error(err)
@@ -335,6 +333,8 @@ func (cdsr *ChampionDetailStatisticsRepository) collect(database db.Context) (*C
 		}
 		championCounterStatisticsMap[championId] = append(championCounterStatisticsMap[championId], counter)
 	}
+	log.Infof("champion detail counter query complete: rows=%d duration=%s",
+		len(championCounterStatisticsMXDAOs), time.Since(counterStarted))
 	log.Debugf("championCounterStatisticsMXDAOs fetch complete: %d, size: %s",
 		len(championCounterStatisticsMXDAOs), util.MemorySizeOfArray(championCounterStatisticsMXDAOs))
 

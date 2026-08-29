@@ -199,6 +199,14 @@ after row-count and application verification. The database user needs `CREATE`,
 `ALTER`, `INDEX`, `TRIGGER`, and `DROP` privileges. Run large index migrations
 during a low-traffic maintenance window.
 
+The mastery statistics migration replaces the global mastery-table aggregation with
+a dirty-champion materialized aggregate. See [Incremental mastery statistics
+operations](docs/mastery-statistics-operations.md) for rollout and verification.
+
+The Champion Detail and meta collector uses one recent-patch staging table instead
+of 24 explicit temporary tables. See [Champion Detail statistics operations](docs/champion-detail-statistics-operations.md) for rollout and performance
+verification.
+
 ### 4. Run the Development Server
 
 ```bash
