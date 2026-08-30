@@ -131,7 +131,7 @@ func InitializeStatisticRepos() error {
 		return err
 	}
 
-	championBatchSize, err := integerEnvironment("STATISTICS_CHAMPION_DETAIL_SOURCE_BATCH_SIZE", 250, 10, 5000)
+	championBatchSize, err := integerEnvironment("STATISTICS_CHAMPION_DETAIL_SOURCE_BATCH_SIZE", 10, 10, 5000)
 	if err != nil {
 		return err
 	}
