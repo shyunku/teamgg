@@ -117,15 +117,18 @@ func ensureMasteryStatisticsCoveringIndex(ctx context.Context, database *sqlx.DB
 
 func ensureMasteryStatisticsTrigger(ctx context.Context, database *sqlx.DB, name, timing, event, statement string) error {
 	var existing struct {
-		Table  string `db:"event_object_table"`
-		Timing string `db:"action_timing"`
-		Event  string `db:"event_manipulation"`
+		Table  string
+		Timing string
+		Event  string
 	}
-	err := database.GetContext(ctx, &existing, `
+	// information_schema column labels can be returned in upper case depending
+	// on the MySQL server. Scan by position so trigger validation does not rely
+	// on sqlx's case-sensitive struct-field mapping.
+	err := database.QueryRowxContext(ctx, `
 		SELECT event_object_table, action_timing, event_manipulation
 		FROM information_schema.triggers
 		WHERE trigger_schema = DATABASE() AND trigger_name = ?
-	`, name)
+	`, name).Scan(&existing.Table, &existing.Timing, &existing.Event)
 	if err == nil {
 		if existing.Table == "masteries" && existing.Timing == timing && existing.Event == event {
 			return nil
