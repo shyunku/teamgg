@@ -18,7 +18,7 @@
 
 ## 추천 작업 순서
 
-`#68, #61, #62, #63, #64, #65, #66, #42, #51, #50, #52, #49, #44, #45, #46, #47, #48`
+`#68, #62, #63, #64, #65, #66, #42, #51, #50, #52, #49, #44, #45, #46, #47, #48`
 
 ## 작업 목록
 
@@ -31,8 +31,8 @@
 | 65 | backend | 🔴 TODO | 2026-08-20 | #60, #64 | 룬 데이터를 참가자당 고정 컬럼 또는 단일 `participant_perks` 행으로 평탄화하는 스키마를 설계하고, 이중 쓰기·백필·검증·읽기 전환·구 테이블 제거 순서의 무중단 마이그레이션을 구현한다. |
 | 64 | backend | 🔴 TODO | 2026-08-20 | #60 | `summoners`, `matches`, `match_participants`에 숫자 PK를 도입하고 PUUID·match ID·UUID가 하위 테이블과 보조 인덱스에 반복되지 않도록 숫자 FK 기반 스키마 v2 및 단계적 백필·전환 계획을 구현한다. |
 | 63 | backend | 🔴 TODO | 2026-08-20 | — | 운영 DB의 `performance_schema` 사용량과 실제 통계/조회 쿼리 `EXPLAIN`을 다시 수집해 미사용·중복 인덱스를 확정하고, 우선 `match_participant_perk_styles(description)` 등 후보를 롤백 가능한 마이그레이션으로 제거한다. |
-| 62 | backend | 🟡 WIP | 2026-08-30 05:39 | — | 최근 패치 선필터 후 참가자·룬·아이템·동일 라인 상대를 한 행으로 정규화하는 영구 staging 테이블과 CTE 메타·카운터 집계를 구현해 기존 24개 명시적 임시 테이블을 제거했다. 구조 테스트, 전체 Go 테스트·빌드, 격리 MySQL 8 통합 테스트에서 패치 필터·메타·카운터 결과를 검증했다. 운영 구버전 기준으로 첫 Champion Detail 집계가 9분 6초 이상 전역 통계 락을 점유했고 과거 중복 인덱스 오류가 확인됐다. 배포 후 실행 시간·임시 공간·잠금을 동일 기준으로 비교한 뒤 완료 처리한다. |
-| 61 | backend | 🟡 WIP | 2026-08-30 05:39 | — | 커버링 인덱스, dirty-champion queue·변경 트리거, DB cutoff 기반 재시작·동시 갱신 안전 처리, materialized aggregate 및 챔피언별 Top 30 조회 전환을 구현하고 단위 테스트를 통과했다. 운영 구버전 `EXPLAIN`에서 약 3,533만 mastery 행 전체 인덱스 순회와 대표 챔피언 Top 30의 약 42만 행 범위를 확인했다. 배포 후 정확도·실행 시간·잠금·쿼리 계획을 동일 기준으로 비교한 뒤 완료 처리한다. |
+| 62 | backend | 🟡 WIP | 2026-08-30 11:38 | — | 최근 패치 영구 staging과 CTE 메타·카운터 집계를 운영 배포하고 쿼리 조인 비용도 줄였다. 그러나 운영 검증에서 기존 base 집계는 1,560초, 개선 후에도 917초 동안 완료되지 않았고 source INSERT도 909초 동안 완료되지 않아 각각 안전하게 중단했다. 장기 쿼리와 검증 컨테이너를 정리하고 백엔드 healthy·실행 중 통계 쿼리 0개를 확인했다. 패치·챔피언 단위 증분 영구 집계와 재시작 가능한 bounded backfill로 전환하고 운영 완료 시간을 재검증해야 한다. 상세 결과는 `docs/reports/2026-08-30-statistics-production-verification.md`를 참조한다. |
+| 61 | backend | 🟢 DONE | 2026-08-30 11:38 | — | 숙련도 통계를 커버링 인덱스, dirty-champion queue·변경 트리거, materialized aggregate와 챔피언별 Top 30 조회로 전환해 운영 배포했다. 마이그레이션 12개 clean, 신규 테이블·트리거·인덱스, covering-index 및 filesort 없는 Top 30 계획을 확인했다. 첫 236개 갱신은 1분 25초, 후속 184개 갱신은 1분 31초였고 비챔피언 `600xx` ID를 안전하게 제외한 뒤 1.03MB snapshot 저장에 성공했다. 활성 수집 이후 변경분은 dirty queue로 추적됨을 확인했다. 상세 결과는 `docs/reports/2026-08-30-statistics-production-verification.md`를 참조한다. |
 | 60 | backend | 🔵 DONE | 2026-08-21 | — | 적용된 마이그레이션을 기록하는 스키마 버전 테이블과 순차 실행기를 도입했다. 시작 시 체크섬·dirty 상태·필수 테이블/컬럼/인덱스 드리프트를 검증하고, 명시적 `migrate` 명령에서 누락된 `summoner_matches(puuid, match_id)` PK를 미러 트리거·재시작 가능한 keyset cursor·중복 제거·원자적 교체로 안전하게 적용한다. 전체 Go 테스트와 빌드를 통과했으며 실제 운영 DB에는 실행하지 않았다. |
 | 59 | backend | 🔵 DONE | 2026-08-20 | #58 | 소환사·경기별 `last_processed_at`/`next_eligible_at` 상태를 분리해 cooldown 중 재등록을 차단하고, 기존 완료 job을 PK cursor로 재시작 가능하게 소량 백필한다. 삭제는 기본 비활성 opt-in이며 상태가 보존된 `done` job만 보존 기간 후 제한된 배치로 정리한다. `match_sources`도 별도 복합 PK cursor로 스캔·삭제하고 pending/processing/failed 행은 보존한다. 환경변수 안전 경계, cursor 재시작·진행, bounded delete 테스트와 전체 Go 테스트·빌드를 통과했다. |
 | 58 | backend | 🔵 DONE | 2026-08-20 | — | DataExplorer를 명시적 opt-in으로 전환하고 기존 참가자 bootstrap과 참가자 관계 확장을 별도 opt-in으로 분리했다. `bounded` 정책과 `maxDepth` 0~10 경계, 신규 소환사/경기 일일 예산 500/1500 기본값, 저장된 작업 깊이를 유지하는 재시작 경계를 적용했으며 공용 매치 저장 경로의 무조건 재탐색을 제거했다. 환경변수·깊이·예산·재시작 테스트와 전체 Go 테스트·빌드를 통과했다. |
