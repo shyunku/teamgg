@@ -45,7 +45,7 @@ func GetChampionDetailStatisticMXDAOs(db db.Context, versions []string) ([]Champ
 		WITH ChampionStats AS (
 			SELECT
 				mp.champion_id AS champion_id,
-				SUM(t.win) AS win,
+				SUM(mp.win) AS win,
 				COUNT(*) AS total,
 				AVG(mp.total_minions_killed) as avg_minions_killed,
 				AVG(mp.kills) as avg_kills,
@@ -66,9 +66,8 @@ func GetChampionDetailStatisticMXDAOs(db db.Context, versions []string) ([]Champ
 				AVG(mp.total_damage_taken / m.game_duration) as avg_damage_taken_per_sec,
 				AVG(mp.total_time_cc_dealt / m.game_duration) as avg_time_cc_dealt_per_sec,
 				AVG(mpd.damage_self_mitigated / m.game_duration) as avg_damage_self_mitigated_per_sec
-			FROM match_participants mp
-			LEFT JOIN matches m ON mp.match_id = m.match_id
-			LEFT JOIN match_teams t ON mp.team_id = t.team_id AND m.match_id = t.match_id
+			FROM matches m FORCE INDEX (matches_game_version_index)
+			STRAIGHT_JOIN match_participants mp ON mp.match_id = m.match_id
 			LEFT JOIN match_participant_details mpd ON mp.match_id = mpd.match_id
 				   AND mp.match_participant_id = mpd.match_participant_id
 			WHERE game_duration > 0 AND game_version IN (?)

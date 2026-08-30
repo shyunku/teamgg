@@ -18,14 +18,14 @@ func GetChampionPositionStatisticsMXDAOs(db db.Context, versions []string) ([]Ch
 	var statistics []ChampionPositionStatisticsMXDAO
 	query, args, err := sqlx.In(`
 		SELECT
-			champion_id,
-			team_position,
-			SUM(win) AS win,
+			participant.champion_id,
+			participant.team_position,
+			SUM(participant.win) AS win,
 			COUNT(*) AS total
-		FROM match_participants
-		LEFT JOIN matches ON match_participants.match_id = matches.match_id
-		WHERE team_position != '' AND game_version IN (?)
-		GROUP BY champion_id, team_position;
+		FROM matches match_row FORCE INDEX (matches_game_version_index)
+		STRAIGHT_JOIN match_participants participant ON participant.match_id = match_row.match_id
+		WHERE participant.team_position != '' AND match_row.game_version IN (?)
+		GROUP BY participant.champion_id, participant.team_position;
 	`, versions)
 	if err != nil {
 		return nil, err

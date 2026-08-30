@@ -255,11 +255,13 @@ func (cdsr *ChampionDetailStatisticsRepository) collect(database db.Context) (*C
 
 	// collect data
 	championDetailStatisticsMXDAOmap := make(map[int]statistics_models.ChampionDetailStatisticMXDAO)
+	detailStarted := time.Now()
 	championDetailStatisticMXDAOs, err := statistics_models.GetChampionDetailStatisticMXDAOs(database, recentMatchGameVersions)
 	if err != nil {
 		log.Error(err)
 		return nil, err
 	}
+	log.Infof("champion detail base query complete: rows=%d duration=%s", len(championDetailStatisticMXDAOs), time.Since(detailStarted))
 	for _, championDetailStatisticMXDAO := range championDetailStatisticMXDAOs {
 		championDetailStatisticsMXDAOmap[championDetailStatisticMXDAO.ChampionId] = championDetailStatisticMXDAO
 	}
@@ -268,11 +270,13 @@ func (cdsr *ChampionDetailStatisticsRepository) collect(database db.Context) (*C
 
 	// collect champion pick count by team position
 	championPositionStatisticsMXDAOmap := make(map[int]map[string]ChampionPositionStatistics)
+	positionStarted := time.Now()
 	championPositionStatisticsMXDAOs, err := statistics_models.GetChampionPositionStatisticsMXDAOs(database, recentMatchGameVersions)
 	if err != nil {
 		log.Error(err)
 		return nil, err
 	}
+	log.Infof("champion detail position query complete: rows=%d duration=%s", len(championPositionStatisticsMXDAOs), time.Since(positionStarted))
 	for _, championPositionStatisticsMXDAO := range championPositionStatisticsMXDAOs {
 		championId := championPositionStatisticsMXDAO.ChampionId
 		if _, exists := championPositionStatisticsMXDAOmap[championId]; !exists {
