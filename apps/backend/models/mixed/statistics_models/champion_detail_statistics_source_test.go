@@ -2,9 +2,11 @@ package statistics_models
 
 import (
 	"database/sql"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 type championDetailSourceTestResult int64
@@ -13,84 +15,164 @@ func (result championDetailSourceTestResult) LastInsertId() (int64, error) { ret
 func (result championDetailSourceTestResult) RowsAffected() (int64, error) { return int64(result), nil }
 
 type championDetailSourceTestContext struct {
-	rowCount    int64
-	execQueries []string
-	execArgs    [][]interface{}
+	execQueries  []string
+	execArgs     [][]interface{}
+	selectCalls  int
+	matchBatches [][]string
+	cursor       string
+	processed    int64
 }
 
 func (context *championDetailSourceTestContext) Exec(query string, args ...interface{}) (sql.Result, error) {
 	context.execQueries = append(context.execQueries, query)
 	context.execArgs = append(context.execArgs, args)
-	return championDetailSourceTestResult(1), nil
+	return championDetailSourceTestResult(0), nil
 }
 
-func (context *championDetailSourceTestContext) Get(destination interface{}, _ string, _ ...interface{}) error {
-	rowCount, ok := destination.(*int64)
-	if !ok {
-		panic("unexpected get destination")
+func (context *championDetailSourceTestContext) Get(destination interface{}, query string, _ ...interface{}) error {
+	switch value := destination.(type) {
+	case *championDetailProgress:
+		if context.cursor == "" {
+			return sql.ErrNoRows
+		}
+		value.LastMatchId = context.cursor
+		value.ProcessedMatches = context.processed
+		return nil
+	case *int64:
+		if strings.Contains(query, championDetailBanSourceTable) {
+			*value = 2
+		} else {
+			*value = 20
+		}
+		return nil
+	default:
+		return errors.New("unexpected get destination")
 	}
-	*rowCount = context.rowCount
-	return nil
 }
 
-func (context *championDetailSourceTestContext) Select(interface{}, string, ...interface{}) error {
-	panic("unexpected select")
+func (context *championDetailSourceTestContext) Select(destination interface{}, _ string, _ ...interface{}) error {
+	matchIds, ok := destination.(*[]string)
+	if !ok {
+		return errors.New("unexpected select destination")
+	}
+	if context.selectCalls < len(context.matchBatches) {
+		*matchIds = append(*matchIds, context.matchBatches[context.selectCalls]...)
+	}
+	context.selectCalls++
+	return nil
 }
 
 func (context *championDetailSourceTestContext) Rebind(query string) string { return query }
 
-func TestPrepareChampionDetailStatisticsSourceFiltersBeforeJoiningLargeTables(t *testing.T) {
-	database := &championDetailSourceTestContext{rowCount: 10}
-	versions := []string{"16.16.1", "16.15.1", "16.14.1"}
-	if err := PrepareChampionDetailStatisticsSource(database, versions); err != nil {
+func TestPrepareIncrementalChampionDetailStatisticsSourceUsesBoundedCursorBatches(t *testing.T) {
+	database := &championDetailSourceTestContext{matchBatches: [][]string{{"KR_1", "KR_2"}, {}}}
+	result, err := PrepareIncrementalChampionDetailStatisticsSource(
+		database,
+		[]string{"16.16.1"},
+		ChampionDetailSourceOptions{BatchSize: 2, CleanupSize: 100, WorkLimit: time.Minute},
+	)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if len(database.execQueries) != 2 {
-		t.Fatalf("expected truncate and one population statement, got %d", len(database.execQueries))
+	if !result.Ready || result.ProcessedBatches != 1 || result.ProcessedMatches != 2 {
+		t.Fatalf("unexpected preparation result: %+v", result)
 	}
-	if strings.TrimSpace(database.execQueries[0]) != "TRUNCATE TABLE champion_detail_statistics_source" {
-		t.Fatalf("unexpected staging reset: %s", database.execQueries[0])
+	for _, query := range database.execQueries {
+		if strings.Contains(strings.ToUpper(query), "TRUNCATE") {
+			t.Fatalf("incremental source must not truncate reusable data: %s", query)
+		}
 	}
-	query := database.execQueries[1]
-	if strings.Contains(strings.ToUpper(query), "CREATE TEMPORARY TABLE") {
-		t.Fatalf("population query recreated the legacy temporary-table pipeline: %s", query)
+	participantBatch := -1
+	for index, query := range database.execQueries {
+		if strings.Contains(query, "INSERT INTO champion_detail_statistics_participants") {
+			participantBatch = index
+			break
+		}
 	}
-	filterAt := strings.Index(query, "FROM matches FORCE INDEX (matches_game_version_index)")
-	participantAt := strings.Index(query, "INNER JOIN match_participants")
-	if filterAt < 0 || participantAt < 0 || filterAt > participantAt {
-		t.Fatalf("recent match filtering does not precede participant expansion")
+	if participantBatch < 0 {
+		t.Fatal("participant batch was not populated")
 	}
-	if !strings.Contains(query, "WHERE game_version IN (?, ?, ?)") {
-		t.Fatalf("patch filter was not safely expanded: %s", query)
+	if !reflect.DeepEqual(database.execArgs[participantBatch], []interface{}{"16.16.1", "KR_1", "KR_2"}) {
+		t.Fatalf("unexpected bounded batch arguments: %#v", database.execArgs[participantBatch])
 	}
-	if !reflect.DeepEqual(database.execArgs[1], []interface{}{"16.16.1", "16.15.1", "16.14.1"}) {
-		t.Fatalf("unexpected patch arguments: %#v", database.execArgs[1])
+	query := database.execQueries[participantBatch]
+	for _, required := range []string{
+		"game_version = ? AND match_id IN (?, ?)",
+		"ON DUPLICATE KEY UPDATE",
+		"LEFT JOIN match_participant_details",
+	} {
+		if !strings.Contains(query, required) {
+			t.Fatalf("participant batch query is missing %q", required)
+		}
 	}
 }
 
-func TestPrepareChampionDetailStatisticsSourceRejectsMissingVersions(t *testing.T) {
+func TestPrepareIncrementalChampionDetailStatisticsSourceResumesAfterCursor(t *testing.T) {
+	database := &championDetailSourceTestContext{
+		cursor:       "KR_2",
+		processed:    2,
+		matchBatches: [][]string{{"KR_3"}, {}},
+	}
+	result, err := PrepareIncrementalChampionDetailStatisticsSource(
+		database,
+		[]string{"16.16.1"},
+		ChampionDetailSourceOptions{BatchSize: 2, CleanupSize: 100, WorkLimit: time.Minute},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Ready || result.ProcessedMatches != 1 {
+		t.Fatalf("unexpected resume result: %+v", result)
+	}
+	found := false
+	for index, query := range database.execQueries {
+		if strings.Contains(query, "INSERT INTO champion_detail_statistics_participants") {
+			found = true
+			if !reflect.DeepEqual(database.execArgs[index], []interface{}{"16.16.1", "KR_3"}) {
+				t.Fatalf("resume did not honor cursor: %#v", database.execArgs[index])
+			}
+		}
+	}
+	if !found {
+		t.Fatal("resumed participant batch was not populated")
+	}
+}
+
+func TestPrepareIncrementalChampionDetailStatisticsSourceRejectsUnsafeOptions(t *testing.T) {
 	database := &championDetailSourceTestContext{}
-	if err := PrepareChampionDetailStatisticsSource(database, nil); err == nil {
-		t.Fatal("missing patch versions must be rejected")
-	}
-	if len(database.execQueries) != 0 {
-		t.Fatal("staging table was mutated without patch versions")
+	for _, test := range []struct {
+		name     string
+		versions []string
+		options  ChampionDetailSourceOptions
+	}{
+		{name: "versions", options: ChampionDetailSourceOptions{BatchSize: 1, CleanupSize: 1, WorkLimit: time.Second}},
+		{name: "batch", versions: []string{"16.16.1"}, options: ChampionDetailSourceOptions{CleanupSize: 1, WorkLimit: time.Second}},
+		{name: "cleanup", versions: []string{"16.16.1"}, options: ChampionDetailSourceOptions{BatchSize: 1, WorkLimit: time.Second}},
+		{name: "duration", versions: []string{"16.16.1"}, options: ChampionDetailSourceOptions{BatchSize: 1, CleanupSize: 1}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := PrepareIncrementalChampionDetailStatisticsSource(database, test.versions, test.options); err == nil {
+				t.Fatal("invalid source configuration was accepted")
+			}
+		})
 	}
 }
 
-func TestChampionDetailQueriesUseOneReusableStagingTable(t *testing.T) {
+func TestChampionDetailQueriesUseIncrementalSources(t *testing.T) {
 	for name, query := range map[string]string{
 		"meta":    championDetailMetaQuery,
 		"counter": championCounterQuery,
 	} {
 		t.Run(name, func(t *testing.T) {
-			if !strings.Contains(query, "FROM champion_detail_statistics_source") {
-				t.Fatal("query does not use the filtered staging source")
+			if strings.Contains(query, "FROM matches ") || strings.Contains(query, "FROM match_participants") {
+				t.Fatalf("%s query still scans raw match tables", name)
 			}
-			for _, legacy := range []string{"RecentParticipants", "MainGroup", "FinalRankedMetas", "CounterGroup"} {
-				if strings.Contains(query, legacy) {
-					t.Fatalf("query still depends on legacy temporary table %s", legacy)
+			if name == "meta" || name == "counter" {
+				if !strings.Contains(query, "FROM champion_detail_statistics_valid_builds") {
+					t.Fatal("build query does not use the validated incremental view")
 				}
+			} else if !strings.Contains(query, "FROM champion_detail_statistics_participants") {
+				t.Fatal("aggregate query does not use the incremental participant source")
 			}
 		})
 	}

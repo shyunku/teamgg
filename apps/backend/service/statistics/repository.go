@@ -14,10 +14,12 @@ import (
 	"math"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"team.gg-server/core"
 	"team.gg-server/libs/db"
 	"team.gg-server/models"
+	"team.gg-server/models/mixed/statistics_models"
 	"team.gg-server/util"
 	"time"
 )
@@ -25,11 +27,12 @@ import (
 const StatisticsDataPath = "datafiles/statistics"
 
 var (
-	StatisticsDB                  *db.Database                        = nil
-	ChampionDetailStatisticsRepo  *ChampionDetailStatisticsRepository = nil
-	TierStatisticsRepo            *TierStatisticsRepository           = nil
-	MasteryStatisticsRepo         *MasteryStatisticsRepository        = nil
-	ErrStatisticsCollectionLocked                                     = errors.New("statistics collection is running on another instance")
+	StatisticsDB                   *db.Database                        = nil
+	ChampionDetailStatisticsRepo   *ChampionDetailStatisticsRepository = nil
+	TierStatisticsRepo             *TierStatisticsRepository           = nil
+	MasteryStatisticsRepo          *MasteryStatisticsRepository        = nil
+	ErrStatisticsCollectionLocked                                      = errors.New("statistics collection is running on another instance")
+	ErrStatisticsCollectionPending                                     = errors.New("statistics collection has bounded work remaining")
 )
 
 type cancelableDatabase struct {
@@ -128,7 +131,25 @@ func InitializeStatisticRepos() error {
 		return err
 	}
 
-	ChampionDetailStatisticsRepo = NewChampionDetailStatisticsRepository(championConfig)
+	championBatchSize, err := integerEnvironment("STATISTICS_CHAMPION_DETAIL_SOURCE_BATCH_SIZE", 250, 10, 5000)
+	if err != nil {
+		return err
+	}
+	championCleanupSize, err := integerEnvironment("STATISTICS_CHAMPION_DETAIL_CLEANUP_BATCH_SIZE", 5000, 100, 50000)
+	if err != nil {
+		return err
+	}
+	championWorkLimit, err := durationEnvironment("STATISTICS_CHAMPION_DETAIL_BACKFILL_WORK_LIMIT", time.Minute, false)
+	if err != nil {
+		return err
+	}
+
+	ChampionDetailStatisticsRepo = NewChampionDetailStatisticsRepository(
+		championConfig,
+		statistics_models.ChampionDetailSourceOptions{
+			BatchSize: championBatchSize, WorkLimit: championWorkLimit, CleanupSize: championCleanupSize,
+		},
+	)
 	TierStatisticsRepo = NewTierStatisticsRepository(tierConfig)
 	MasteryStatisticsRepo = NewMasteryStatisticsRepository(masteryConfig)
 	return nil
@@ -178,6 +199,21 @@ func boolEnvironment(key string) bool {
 	}
 }
 
+func integerEnvironment(key string, fallback, minimum, maximum int) (int, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be an integer: %w", key, err)
+	}
+	if value < minimum || value > maximum {
+		return 0, fmt.Errorf("%s must be between %d and %d", key, minimum, maximum)
+	}
+	return value, nil
+}
+
 func runLoop(
 	ctx context.Context,
 	key string,
@@ -208,6 +244,9 @@ func runLoop(
 			if errors.Is(err, ErrStatisticsCollectionLocked) {
 				delay = config.LockRetryDelay
 				log.Infof("Statistics %s is being collected by another instance; retrying in %s", key, delay)
+			} else if errors.Is(err, ErrStatisticsCollectionPending) {
+				delay = config.LockRetryDelay
+				log.Infof("Statistics %s bounded backfill is incomplete; continuing in %s: %v", key, delay, err)
 			} else if !errors.Is(err, context.Canceled) {
 				delay = config.RetryDelay
 				log.Errorf("Statistics %s collection failed; retrying in %s: %v", key, delay, err)

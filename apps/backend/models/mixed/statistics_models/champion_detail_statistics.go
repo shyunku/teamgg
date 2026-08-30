@@ -3,6 +3,7 @@ package statistics_models
 import (
 	"database/sql"
 	"errors"
+
 	"github.com/jmoiron/sqlx"
 	"team.gg-server/libs/db"
 )
@@ -38,58 +39,51 @@ type ChampionDetailStatisticMXDAO struct {
 	AvgDamageSelfMitigatedPerSec float64 `db:"avg_damage_self_mitigated_per_sec" json:"avgDamageSelfMitigatedPerSec"`
 }
 
-func GetChampionDetailStatisticMXDAOs(db db.Context, versions []string) ([]ChampionDetailStatisticMXDAO, error) {
+func GetChampionDetailStatisticMXDAOs(database db.Context, versions []string) ([]ChampionDetailStatisticMXDAO, error) {
 	var statistics []ChampionDetailStatisticMXDAO
 
 	query, args, err := sqlx.In(`
 		WITH ChampionStats AS (
 			SELECT
-				mp.champion_id AS champion_id,
-				SUM(mp.win) AS win,
+				champion_id,
+				SUM(win) AS win,
 				COUNT(*) AS total,
-				AVG(mp.total_minions_killed) as avg_minions_killed,
-				AVG(mp.kills) as avg_kills,
-				AVG(mp.deaths) as avg_deaths,
-				AVG(mp.assists) as avg_assists,
-				AVG(mp.gold_earned) as avg_gold_earned,
-				AVG(mp.total_damage_dealt_to_champions) as avg_damage_dealt_to_champions,
-				AVG(mp.total_damage_taken) as avg_damage_taken,
-				AVG(mp.total_heal) as avg_heal,
-				AVG(mp.vision_score) as avg_vision_score,
-				AVG(mp.total_time_cc_dealt) as avg_time_cc_dealt,
-				AVG(mpd.damage_self_mitigated) as avg_damage_self_mitigated,
-				AVG(mpd.damage_dealt_to_buildings) as avg_damage_dealt_to_buildings,
-				AVG(mpd.damage_dealt_to_objectives) as avg_damage_dealt_to_objectives,
-				AVG(mpd.damage_dealt_to_turrets) as avg_damage_dealt_to_turrets,
-				AVG(mp.total_heal / m.game_duration) as avg_heal_per_sec,
-				AVG(mp.vision_score / m.game_duration) as avg_vision_score_per_sec,
-				AVG(mp.total_damage_taken / m.game_duration) as avg_damage_taken_per_sec,
-				AVG(mp.total_time_cc_dealt / m.game_duration) as avg_time_cc_dealt_per_sec,
-				AVG(mpd.damage_self_mitigated / m.game_duration) as avg_damage_self_mitigated_per_sec
-			FROM matches m FORCE INDEX (matches_game_version_index)
-			STRAIGHT_JOIN match_participants mp ON mp.match_id = m.match_id
-			LEFT JOIN match_participant_details mpd ON mp.match_id = mpd.match_id
-				   AND mp.match_participant_id = mpd.match_participant_id
+				AVG(total_minions_killed) AS avg_minions_killed,
+				AVG(kills) AS avg_kills,
+				AVG(deaths) AS avg_deaths,
+				AVG(assists) AS avg_assists,
+				AVG(gold_earned) AS avg_gold_earned,
+				AVG(total_damage_dealt_to_champions) AS avg_damage_dealt_to_champions,
+				AVG(total_damage_taken) AS avg_damage_taken,
+				AVG(total_heal) AS avg_heal,
+				AVG(vision_score) AS avg_vision_score,
+				AVG(total_time_cc_dealt) AS avg_time_cc_dealt,
+				AVG(damage_self_mitigated) AS avg_damage_self_mitigated,
+				AVG(damage_dealt_to_buildings) AS avg_damage_dealt_to_buildings,
+				AVG(damage_dealt_to_objectives) AS avg_damage_dealt_to_objectives,
+				AVG(damage_dealt_to_turrets) AS avg_damage_dealt_to_turrets,
+				AVG(total_heal / NULLIF(game_duration, 0)) AS avg_heal_per_sec,
+				AVG(vision_score / NULLIF(game_duration, 0)) AS avg_vision_score_per_sec,
+				AVG(total_damage_taken / NULLIF(game_duration, 0)) AS avg_damage_taken_per_sec,
+				AVG(total_time_cc_dealt / NULLIF(game_duration, 0)) AS avg_time_cc_dealt_per_sec,
+				AVG(damage_self_mitigated / NULLIF(game_duration, 0)) AS avg_damage_self_mitigated_per_sec
+			FROM champion_detail_statistics_participants
 			WHERE game_duration > 0 AND game_version IN (?)
-			GROUP BY mp.champion_id
+			GROUP BY champion_id
 		), BanStats AS (
-			SELECT
-				mtb.champion_id,
-				COUNT(*) AS total_bans
-			FROM match_team_bans mtb
-			INNER JOIN matches m ON mtb.match_id = m.match_id
-			WHERE m.game_version IN (?)
-			GROUP BY mtb.champion_id
+			SELECT champion_id, COUNT(*) AS total_bans
+			FROM champion_detail_statistics_bans
+			WHERE game_version IN (?)
+			GROUP BY champion_id
 		), MatchCount AS (
-			SELECT
-				COUNT(*) AS matches
-			FROM matches
+			SELECT COUNT(DISTINCT match_id) AS matches
+			FROM champion_detail_statistics_participants
 			WHERE game_version IN (?)
 		)
 		SELECT
 			cs.*,
-			IF(ISNULL(bs.total_bans), 0, bs.total_bans / mc.matches) as ban_rate,
-			cs.total / mc.matches as pick_rate
+			IF(ISNULL(bs.total_bans), 0, bs.total_bans / NULLIF(mc.matches, 0)) AS ban_rate,
+			cs.total / NULLIF(mc.matches, 0) AS pick_rate
 		FROM ChampionStats cs
 		LEFT JOIN BanStats bs ON cs.champion_id = bs.champion_id
 		CROSS JOIN MatchCount mc;
@@ -98,8 +92,8 @@ func GetChampionDetailStatisticMXDAOs(db db.Context, versions []string) ([]Champ
 		return nil, err
 	}
 
-	query = db.Rebind(query)
-	if err := db.Select(&statistics, query, args...); err != nil {
+	query = database.Rebind(query)
+	if err := database.Select(&statistics, query, args...); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return make([]ChampionDetailStatisticMXDAO, 0), nil
 		}

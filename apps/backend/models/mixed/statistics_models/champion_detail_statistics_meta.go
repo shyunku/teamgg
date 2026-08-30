@@ -237,7 +237,7 @@ const championDetailMetaQuery = `
 	WITH SummonerSpellCounts AS (
 		SELECT champion_id, team_position, primary_style, sub_style,
 			summoner1_id, summoner2_id, COUNT(*) AS count
-		FROM champion_detail_statistics_source
+		FROM champion_detail_statistics_valid_builds
 		GROUP BY champion_id, team_position, primary_style, sub_style, summoner1_id, summoner2_id
 	), SummonerSpellRanks AS (
 		SELECT *, ROW_NUMBER() OVER (
@@ -250,7 +250,7 @@ const championDetailMetaQuery = `
 			primary_perk0, primary_perk1, primary_perk2, primary_perk3,
 			sub_perk0, sub_perk1, stat_perk_defense, stat_perk_flex, stat_perk_offense,
 			COUNT(*) AS count
-		FROM champion_detail_statistics_source
+		FROM champion_detail_statistics_valid_builds
 		GROUP BY champion_id, team_position, primary_style, sub_style,
 			primary_perk0, primary_perk1, primary_perk2, primary_perk3,
 			sub_perk0, sub_perk1, stat_perk_defense, stat_perk_flex, stat_perk_offense
@@ -267,7 +267,7 @@ const championDetailMetaQuery = `
 			(item0_id IS NOT NULL) + (item1_id IS NOT NULL) + (item2_id IS NOT NULL)
 				+ (item3_id IS NOT NULL) + (item4_id IS NOT NULL) + (item5_id IS NOT NULL) AS item_count,
 			COUNT(*) AS full_item_tree_count
-		FROM champion_detail_statistics_source
+		FROM champion_detail_statistics_valid_builds
 		WHERE item0_id IS NOT NULL AND item1_id IS NOT NULL AND item2_id IS NOT NULL
 		GROUP BY champion_id, champion_name, team_position, primary_style, sub_style,
 			item0_id, item1_id, item2_id, item3_id, item4_id, item5_id,
@@ -282,7 +282,7 @@ const championDetailMetaQuery = `
 	), RefinedMetaGroups AS (
 		SELECT champion_id, champion_name, team_position, primary_style, sub_style,
 			item0_id, item1_id, item2_id, SUM(win) AS wins, COUNT(*) AS total, AVG(win) AS win_rate
-		FROM champion_detail_statistics_source
+		FROM champion_detail_statistics_valid_builds
 		WHERE item0_id IS NOT NULL AND item1_id IS NOT NULL AND item2_id IS NOT NULL
 		GROUP BY champion_id, champion_name, team_position, primary_style, sub_style,
 			item0_id, item1_id, item2_id
@@ -336,7 +336,7 @@ const championCounterQuery = `
 	WITH CounterSummonerSpellCounts AS (
 		SELECT champion_id, enemy_champion_id, team_position, primary_style, sub_style,
 			summoner1_id, summoner2_id, COUNT(*) AS count, AVG(win) AS win_rate
-		FROM champion_detail_statistics_source
+		FROM champion_detail_statistics_valid_builds
 		WHERE enemy_champion_id IS NOT NULL
 		GROUP BY champion_id, enemy_champion_id, team_position, primary_style, sub_style,
 			summoner1_id, summoner2_id
@@ -351,7 +351,7 @@ const championCounterQuery = `
 			primary_perk0, primary_perk1, primary_perk2, primary_perk3,
 			sub_perk0, sub_perk1, stat_perk_defense, stat_perk_flex, stat_perk_offense,
 			COUNT(*) AS count, AVG(win) AS win_rate
-		FROM champion_detail_statistics_source
+		FROM champion_detail_statistics_valid_builds
 		WHERE enemy_champion_id IS NOT NULL
 		GROUP BY champion_id, enemy_champion_id, team_position, primary_style, sub_style,
 			primary_perk0, primary_perk1, primary_perk2, primary_perk3,
@@ -368,7 +368,7 @@ const championCounterQuery = `
 			(item0_id IS NOT NULL) + (item1_id IS NOT NULL) + (item2_id IS NOT NULL)
 				+ (item3_id IS NOT NULL) + (item4_id IS NOT NULL) + (item5_id IS NOT NULL) AS item_count,
 			AVG(win) AS win_rate, COUNT(*) AS full_item_tree_count
-		FROM champion_detail_statistics_source
+		FROM champion_detail_statistics_valid_builds
 		WHERE enemy_champion_id IS NOT NULL
 			AND item0_id IS NOT NULL AND item1_id IS NOT NULL AND item2_id IS NOT NULL
 		GROUP BY champion_id, enemy_champion_id, team_position,
@@ -389,7 +389,7 @@ const championCounterQuery = `
 			AVG(enemy_assists) AS avg_enemy_assists,
 			SUM(enemy_win) AS enemy_wins, AVG(enemy_win) AS enemy_win_rate,
 			COUNT(DISTINCT match_id) AS total
-		FROM champion_detail_statistics_source
+		FROM champion_detail_statistics_valid_builds
 		WHERE enemy_champion_id IS NOT NULL
 		GROUP BY champion_id, champion_name, team_position,
 			enemy_champion_id, enemy_champion_name

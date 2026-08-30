@@ -110,6 +110,12 @@ func migrationDefinitions() []Definition {
 			Apply:    applyChampionDetailStatisticsSource,
 			Validate: validateChampionDetailStatisticsSource,
 		},
+		{
+			Version:  "20260830_003",
+			FileName: "20260830_create_incremental_champion_detail_statistics.sql",
+			Apply:    applyIncrementalChampionDetailStatistics,
+			Validate: validateIncrementalChampionDetailStatistics,
+		},
 	}
 }
 

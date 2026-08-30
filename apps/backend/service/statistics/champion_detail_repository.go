@@ -191,13 +191,15 @@ type ChampionDetailStatisticsRepository struct {
 	Cache     *ChampionDetailStatistics
 	MetaCache *MetaStatistics
 	config    RunnerConfig
+	source    statistics_models.ChampionDetailSourceOptions
 }
 
-func NewChampionDetailStatisticsRepository(config RunnerConfig) *ChampionDetailStatisticsRepository {
+func NewChampionDetailStatisticsRepository(config RunnerConfig, source statistics_models.ChampionDetailSourceOptions) *ChampionDetailStatisticsRepository {
 	cdsr := &ChampionDetailStatisticsRepository{
 		Cache:     nil,
 		MetaCache: nil,
 		config:    config,
+		source:    source,
 	}
 	value, err := cdsr.Load()
 	if err != nil {
@@ -253,11 +255,18 @@ func (cdsr *ChampionDetailStatisticsRepository) collect(database db.Context) (*C
 	}
 	log.Debugf("recentMatchGameVersions: %v", recentMatchGameVersions)
 
-	// Build the recent-patch source first. Besides keeping all downstream meta
-	// queries bounded, this makes source preparation independently observable.
-	if err := statistics_models.PrepareChampionDetailStatisticsSource(database, recentMatchGameVersions); err != nil {
+	prepared, err := statistics_models.PrepareIncrementalChampionDetailStatisticsSource(
+		database, recentMatchGameVersions, cdsr.source,
+	)
+	if err != nil {
 		log.Error(err)
 		return nil, err
+	}
+	if !prepared.Ready {
+		return nil, fmt.Errorf(
+			"%w: batches=%d matches=%d",
+			ErrStatisticsCollectionPending, prepared.ProcessedBatches, prepared.ProcessedMatches,
+		)
 	}
 
 	// collect data

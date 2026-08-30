@@ -3,6 +3,7 @@ package statistics_models
 import (
 	"database/sql"
 	"errors"
+
 	"github.com/jmoiron/sqlx"
 	"team.gg-server/libs/db"
 )
@@ -14,26 +15,24 @@ type ChampionPositionStatisticsMXDAO struct {
 	Total        int    `db:"total" json:"total"`
 }
 
-func GetChampionPositionStatisticsMXDAOs(db db.Context, versions []string) ([]ChampionPositionStatisticsMXDAO, error) {
+func GetChampionPositionStatisticsMXDAOs(database db.Context, versions []string) ([]ChampionPositionStatisticsMXDAO, error) {
 	var statistics []ChampionPositionStatisticsMXDAO
 	query, args, err := sqlx.In(`
 		SELECT
-			participant.champion_id,
-			participant.team_position,
-			SUM(participant.win) AS win,
+			champion_id,
+			team_position,
+			SUM(win) AS win,
 			COUNT(*) AS total
-		FROM matches match_row FORCE INDEX (matches_game_version_index)
-		STRAIGHT_JOIN match_participants participant ON participant.match_id = match_row.match_id
-		WHERE participant.team_position != '' AND match_row.game_version IN (?)
-		GROUP BY participant.champion_id, participant.team_position;
+		FROM champion_detail_statistics_participants
+		WHERE team_position != '' AND game_version IN (?)
+		GROUP BY champion_id, team_position;
 	`, versions)
 	if err != nil {
 		return nil, err
 	}
 
-	query = db.Rebind(query)
-
-	if err := db.Select(&statistics, query, args...); err != nil {
+	query = database.Rebind(query)
+	if err := database.Select(&statistics, query, args...); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return make([]ChampionPositionStatisticsMXDAO, 0), nil
 		}

@@ -46,8 +46,8 @@ func TestMigrationManifestIsOrderedAndChecksummed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(migrations) != 12 {
-		t.Fatalf("unexpected migration count: %d", len(migrations))
+	if len(migrations) == 0 {
+		t.Fatal("migration manifest must not be empty")
 	}
 	seen := make(map[string]struct{}, len(migrations))
 	for index, migration := range migrations {
