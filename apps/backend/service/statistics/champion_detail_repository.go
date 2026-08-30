@@ -253,6 +253,13 @@ func (cdsr *ChampionDetailStatisticsRepository) collect(database db.Context) (*C
 	}
 	log.Debugf("recentMatchGameVersions: %v", recentMatchGameVersions)
 
+	// Build the recent-patch source first. Besides keeping all downstream meta
+	// queries bounded, this makes source preparation independently observable.
+	if err := statistics_models.PrepareChampionDetailStatisticsSource(database, recentMatchGameVersions); err != nil {
+		log.Error(err)
+		return nil, err
+	}
+
 	// collect data
 	championDetailStatisticsMXDAOmap := make(map[int]statistics_models.ChampionDetailStatisticMXDAO)
 	detailStarted := time.Now()
@@ -295,11 +302,6 @@ func (cdsr *ChampionDetailStatisticsRepository) collect(database db.Context) (*C
 			PickCount: championPositionStatisticsMXDAO.Total,
 			WinCount:  championPositionStatisticsMXDAO.Win,
 		}
-	}
-
-	if err := statistics_models.PrepareChampionDetailStatisticsSource(database, recentMatchGameVersions); err != nil {
-		log.Error(err)
-		return nil, err
 	}
 
 	// collect meta
