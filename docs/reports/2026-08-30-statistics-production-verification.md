@@ -1,27 +1,31 @@
 # 통계 마이그레이션 및 운영 성능 검증 보고서
 
-- 검증 일시: 2026-08-30 08:27 ~ 11:38 KST
+- 검증 일시: 2026-08-30 08:27 ~ 진행 중 KST
 - 대상: backend Task #61, #62
-- 운영 배포 최종 커밋: `fca3331`
+- 운영 배포 최종 커밋: `af16a54`
 - 운영 환경: Docker Compose backend, MySQL 8
 
 ## 1. 요약
 
 Task #61 숙련도 통계는 운영 마이그레이션과 첫 수집을 완료했다. 약 3,533만 숙련도 행 전체를 매번 정렬하던 구조를 dirty champion 기반 materialized aggregate로 변경했고, 236개 챔피언 초기 갱신을 1분 25초, 184개 후속 갱신을 1분 31초에 처리했다. Top 30도 챔피언별 covering-index 조회로 바뀌어 filesort가 사라졌다.
 
-Task #62 챔피언 상세·메타 통계는 영구 staging과 최근 패치 선필터를 운영 배포했으나 완료 조건을 충족하지 못했다. base 집계는 개선 전 1,560초, 조인 최적화 후에도 917초 동안 완료되지 않았다. staging source INSERT도 909초 동안 완료되지 않아 두 작업 모두 안전하게 중단했다. 다음 단계는 패치·챔피언 단위 증분 영구 집계와 재시작 가능한 bounded backfill이다.
+Task #62 챔피언 상세·메타 통계는 단일 대형 staging INSERT를 폐기하고 경기 단위 cursor, 처리 완료 마커, 실행 시간 제한을 사용하는 증분 영구 source로 전환했다. 운영 초기 백필은 장기 트랜잭션 없이 약 60초 작업 단위로 재개되고 있으며 최신 패치 `16.17`을 완료한 뒤 `16.16`을 처리 중이다. 최종 snapshot과 API 갱신은 백필 완료 후 별도로 검증한다.
 
 ## 2. 적용 변경
 
 ### 2.1 공통 마이그레이션
 
 - `schema_migrations` 기반 순차 마이그레이션을 운영에서 실행했다.
-- `20260830_001`, `20260830_002`를 포함한 12개 마이그레이션이 모두 `dirty=0`임을 확인했다.
+- `20260830_001`, `20260830_002`, `20260830_003`을 포함한 마이그레이션이 모두 `dirty=0`인 상태로 일반 백엔드의 `validate` 기동을 통과했다.
 - 백엔드 일반 기동은 `DB_MIGRATION_MODE=validate`로 스키마 검증을 통과했다.
-- 신규 통계 테이블 3개를 확인했다.
+- Task #61 통계 테이블 2개와 Task #62 증분 source 테이블 4개 및 view를 운영에 적용했다.
   - `mastery_statistics_aggregates`
   - `mastery_statistics_dirty_champions`
-  - `champion_detail_statistics_source`
+  - `champion_detail_statistics_participants`
+  - `champion_detail_statistics_bans`
+  - `champion_detail_statistics_processed_matches`
+  - `champion_detail_statistics_progress`
+  - `champion_detail_statistics_valid_builds` view
 
 ### 2.2 Task #61 숙련도
 
@@ -33,12 +37,14 @@ Task #62 챔피언 상세·메타 통계는 영구 staging과 최근 패치 선�
 
 ### 2.3 Task #62 챔피언 상세·메타
 
-- 최근 3개 short patch의 full version만 선필터하는 영구 staging source를 추가했다.
-- 기존 24개 명시적 임시 테이블을 staging 기반 CTE 메타·카운터 집계로 교체했다.
-- base/position 쿼리가 `matches_game_version_index`를 사용하도록 조인 순서를 고정했다.
-- 승패 합계를 위해 불필요하게 사용하던 `match_teams` 조인을 제거하고 `match_participants.win`을 사용했다.
-- base, position, source, meta, counter 단계별 duration 로그를 추가했다.
-- source 준비를 첫 단계로 옮겨 staging 비용을 독립적으로 관찰할 수 있게 했다.
+- 최근 3개 short patch에 속하는 full version만 대상으로 삼는다.
+- 단일 대형 `champion_detail_statistics_source` INSERT를 경기 ID cursor 기반 작은 배치로 교체했다.
+- 참가자·밴·처리 완료 경기·버전별 cursor를 각각 영구 저장해 프로세스가 종료되어도 다음 실행에서 이어서 처리한다.
+- cursor보다 과거에 늦게 유입된 경기는 processed-match anti join으로 다시 찾아 누락을 방지한다.
+- source 준비 작업에 실행 시간 제한을 두고, 제한에 도달하면 현재 배치까지 커밋한 뒤 글로벌 통계 락을 반환한다.
+- source가 완성되기 전에는 기존 snapshot을 유지하고, 완성된 후에만 base·position·meta·counter 집계와 snapshot 교체를 수행한다.
+- one-shot 명령 `docker compose run --rm backend collect-champion-detail`을 추가해 일반 서버·DataExplorer loop 없이 수집만 검증할 수 있게 했다.
+- 배치 후보 `250`, `10`, `1000`과 match lookup index 선택을 운영에서 비교했다.
 
 ## 3. 장애와 조치
 
@@ -96,6 +102,70 @@ MySQL 드라이버가 `EVENT_OBJECT_TABLE`, `ACTION_TIMING`, `EVENT_MANIPULATION
 
 base 쿼리는 관찰 기준 1,560초에서 917초로 최소 41.2% 짧아졌지만 완료 시간은 확보하지 못했다. 따라서 이 값은 완료 성능 개선율이 아니라 동일 운영 환경에서의 중단 시점 비교다.
 
+#### 수정 1차 — 최근 패치 선필터와 대형 영구 staging
+
+| 항목 | 결과 |
+| --- | --- |
+| 상황 | 전체 원본 테이블을 매 실행마다 임시 테이블로 복제·정렬했다. |
+| 변경 | 최근 3개 패치를 먼저 고르고 영구 staging source를 만든 뒤 base·position·meta·counter를 계산하도록 분리했다. |
+| 성능 변화 | base 관찰 중단 시점은 1,560초에서 917초로 짧아졌지만 완료되지 않았다. source INSERT도 909초 동안 완료되지 않았다. |
+| 판단 | 단일 대형 INSERT와 장기 트랜잭션 자체가 운영 규모에 맞지 않아 폐기했다. |
+
+#### 수정 2차 — 재시작 가능한 증분 source
+
+| 항목 | 결과 |
+| --- | --- |
+| 상황 | 1차 구조는 중단하면 처음부터 다시 시작해 운영 배포와 검증이 불가능했다. |
+| 변경 | 경기 ID cursor, processed-match 마커, 버전별 진행 상태, 늦게 유입된 과거 경기 fallback, 실행 시간 제한을 추가했다. |
+| 성능 변화 | 약 60초 단위로 수백 경기를 커밋하고 다음 주기에서 이어서 처리한다. `16.17` 완료 후 `16.16`으로 전환됨을 확인했다. |
+| 안정성 변화 | 장기 단일 트랜잭션이 사라졌고, 검증 중 deadlock·임시 파일 오류·중복 키 실패는 발생하지 않았다. |
+| 판단 | 초기 백필 시간이 남더라도 중단·재배포·재시작이 가능한 구조이므로 채택했다. |
+
+#### 수정 3차 — 배치 250에서 10으로 축소
+
+| 배치 | 운영 관찰값 | 해석 |
+| ---: | --- | --- |
+| 250 | 500~750경기 / 약 66~73초 | 배치 하나가 길고 작업 제한을 크게 넘길 수 있었다. |
+| 10 | 대표 구간 695~777경기 / 약 60초, 데이터 구간에 따라 1,299경기 / 60초 | 작은 배치가 더 빠르고 제한 시간 준수와 중단 응답성도 좋았다. |
+
+기본값을 `10`으로 변경했다. 한 번의 SQL이 작아져 장애 시 롤백 범위도 줄었다.
+
+#### 수정 4차 — source batch의 match PK lookup 강제
+
+| 항목 | 결과 |
+| --- | --- |
+| 변경 | 이미 선택한 match ID 집합을 다시 읽는 참가자·밴·processed-marker 쿼리에 `PRIMARY` lookup을 강제했다. |
+| 운영 관찰 | 690~736경기 / 약 60초로, 변경 전 대표 범위와 유의미한 차이가 없었다. |
+| 판단 | 실행계획 안정성 회귀 테스트는 유지하되 속도 개선 효과로는 계산하지 않는다. |
+
+#### 수정 5차 — 배치 1000 비교 실험
+
+| 항목 | 결과 |
+| --- | --- |
+| 조건 | batch `1000`, work limit `2m`, 외부 timeout `5m` |
+| 운영 관찰 | 2개 배치 1,011경기, 2분 21.14초, 약 430경기/분 |
+| 성능 변화 | batch 10의 낮은 대표값 695경기/분과 비교해도 약 38% 느렸다. 단일 배치 때문에 2분 work limit도 21초 초과했다. |
+| 판단 | 처리량과 중단 응답성이 모두 악화돼 폐기하고 기본값 10을 유지했다. |
+
+#### 수정 6차 — 최종 백필·snapshot 검증
+
+사용자가 허용한 약 1시간 점검 창에는 일반 backend를 중지하고 DataExplorer 경쟁 없이 one-shot만 실행했다. batch는 `10`, work limit은 `10m`, 구간 재시도는 `1s`로 두었다.
+
+| 집중 구간 | 처리 경기 | 시간 | 처리량 |
+| ---: | ---: | ---: | ---: |
+| 1차 | 11,820 | 10분 0.07초 | 약 1,182경기/분 |
+| 2차 | 11,810 | 10분 0.34초 | 약 1,181경기/분 |
+| 3차 | 11,810 | 10분 0.50초 | 약 1,180경기/분 |
+| 4차 | 11,620 | 10분 0.14초 | 약 1,162경기/분 |
+| 5차 | 11,090 | 10분 0.37초 | 약 1,108경기/분 |
+| 합계 | 58,150 | 약 50분 | 평균 약 1,163경기/분 |
+
+일반 운영의 대표 695~777경기/분보다 약 50~67% 빠르다. API backend와 DataExplorer를 내리고 bounded 구간 사이 휴지를 15초에서 1초로 줄인 효과다. MySQL은 2 vCPU 호스트에서 약 119~130% CPU를 사용했고, 루트 볼륨은 77% 사용·약 31GB 여유를 유지했다. deadlock, duplicate key, temporary file write failure, 수집 오류는 발생하지 않았다.
+
+점검 창 종료 시 source는 `16.16.804.9184`, cursor `KR_8348493336`까지 진행했으나 전체 대상 full version은 아직 준비되지 않았다. one-shot을 grace 종료하고 일반 backend를 복구했으며, 완료 배치는 보존되고 진행 중 배치만 롤백된다. 따라서 base·position·meta·counter 최종 집계, 새 snapshot 및 API `updatedAt` 갱신 검증은 background 백필 완료 후 이어서 기록한다.
+
+복구 후 backend는 `validate` 기동과 health check를 통과했고 공개 API 3개가 모두 HTTP 200을 반환했다. 10분 initial delay 뒤 첫 background 구간이 `602경기 / 60.42초`를 처리해 cursor `KR_8349189095`로 이어졌으며, 이후에도 cursor가 `KR_8350045991`까지 전진했다. 수동 종료 전 완료 배치와 재시작 cursor가 정상 보존되고 글로벌 통계 락이 정상 해제됐음을 확인했다.
+
 첫 최적화 실행 직전과 모든 검증 종료 후의 MySQL 전역 지표는 다음과 같다. 같은 기간 DataExplorer가 계속 실행되어 통계 작업 단독 수치로 해석할 수 없다.
 
 | 지표 | 직전 | 종료 후 | 변화 |
@@ -108,21 +178,18 @@ base 쿼리는 관찰 기준 1,560초에서 917초로 최소 41.2% 짧아졌지�
 ## 5. 최종 운영 상태
 
 - backend 컨테이너: healthy
-- 실행 중인 Champion Detail 통계 SQL: 0개
+- replay-analyzer 컨테이너: healthy
 - 일회성 검증 컨테이너: 제거 완료
-- `champion_detail_statistics_source`: 0행. 중단된 INSERT는 커밋되지 않았다.
-- 마이그레이션: 12개 모두 clean
+- 마이그레이션: `20260830_003`을 포함해 backend `validate` 기동 통과
+- Champion Detail 증분 source: 완료 배치와 cursor 보존, 일반 background loop에서 계속 처리
+- 공개 `/`, champion, meta-summary API: HTTP 200
+- 공개 Champion Detail snapshot: 백필 완료 전이므로 기존 `2026-07-30T17:54:37.296246254Z` snapshot 유지
 - 원본 경기·참가자·숙련도 데이터 삭제 없음
 
 ## 6. 결론 및 후속 작업
 
 Task #61은 운영 배포·수집·snapshot·실행계획 검증을 완료했다.
 
-Task #62는 쿼리 구조와 관측성은 개선했지만 운영 규모에서 완료되지 않아 WIP를 유지한다. 다음 구현은 다음 조건을 만족해야 한다.
+Task #62는 작은 배치, 재시작 가능 cursor, 처리 완료 마커, 실행 시간 제한을 갖춘 증분 source로 전환해 기존 장기 대형 쿼리 문제를 제거했다. 운영 집중 검증에서도 약 50분 동안 오류 없이 58,150경기를 처리했다.
 
-1. 패치·챔피언 단위 영구 aggregate를 사용해 전체 최근 패치 재집계를 제거한다.
-2. 신규 경기만 반영하는 dirty queue 또는 cursor 기반 증분 갱신을 적용한다.
-3. 최초 backfill은 작은 배치, 재시작 가능 cursor, 실행 시간 제한을 제공한다.
-4. source 생성도 단일 대형 INSERT가 아니라 패치 또는 match PK 범위별 bounded batch로 나눈다.
-5. DataExplorer와 통계 backfill의 동시 I/O를 제한하거나 별도 저부하 창에서 실행한다.
-6. 동일 운영 기준에서 완료 시간, 임시 공간, row lock, snapshot 갱신을 다시 측정한다.
+다만 전체 초기 백필과 새 snapshot 생성이 아직 끝나지 않았으므로 WIP를 유지한다. background 백필 완료 후 base·position·meta·counter 단계별 완료 시간, snapshot 크기, 공개 API 갱신 및 두 번째 실행의 빠른 skip까지 검증해야 Task #62를 DONE으로 전환할 수 있다.
