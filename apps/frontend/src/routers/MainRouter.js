@@ -15,6 +15,7 @@ import OauthComplete from "../pages/OauthComplete.svelte";
 import Account from "../pages/Account.svelte";
 import NotFound from "../pages/NotFound.svelte";
 import ReplayAnalysis from "../pages/ReplayAnalysis.svelte";
+import Admin from "../pages/Admin.svelte";
 
 const routes = {
   "/": Home,
@@ -29,6 +30,7 @@ const routes = {
   "/login": Login,
   "/signup": Signup,
   "/account": Account,
+  "/admin": Admin,
   "/replay-analysis/:id": ReplayAnalysis,
   "/privacy-policy": PrivacyPolicy,
   "/terms-of-service": TermsOfService,

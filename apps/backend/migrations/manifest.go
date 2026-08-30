@@ -99,6 +99,16 @@ func migrationDefinitions() []Definition {
 			},
 		},
 		{
+			Version:  "20260823_001",
+			FileName: "20260823_add_admin_operations.sql",
+			Apply: func(_ context.Context, database *sqlx.DB) error {
+				return models.EnsureAdminOperationsSchema(database)
+			},
+			Validate: func(ctx context.Context, database *sqlx.DB) (bool, error) {
+				return tablesExist(ctx, database, "user_roles", "admin_audit_logs", "admin_operational_events")
+			},
+		},
+		{
 			Version:  "20260830_001",
 			FileName: "20260830_add_incremental_mastery_statistics.sql",
 			Apply:    applyMasteryStatisticsAggregates,

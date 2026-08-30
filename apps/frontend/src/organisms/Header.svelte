@@ -21,6 +21,7 @@
     customGame: { key: "custom-game", label: "내전 팀 구성" },
     ingame: { key: "ingame", label: "인게임", hide: !IpcSender.isCurrentElectron, subclass: "ingame" },
     account: { key: "account", label: "계정", hide: true },
+    admin: { key: "admin", label: "관리", hide: true },
   };
 
   let currentPage = HeaderMenus.main;
@@ -28,6 +29,7 @@
   let userId = "";
   let riotProfileIconId = null;
   let isLolAccount = false;
+  let adminRole = "";
   let accountMenuOpen = false;
   let accountLoading = false;
   let accountRequestId = 0;
@@ -64,6 +66,11 @@
     push("/account");
   };
 
+  const goToAdmin = () => {
+    accountMenuOpen = false;
+    push("/admin");
+  };
+
   const tryLogout = async () => {
     try {
       accountMenuOpen = false;
@@ -83,6 +90,7 @@
       userId = account?.displayName ?? account?.riot?.displayName ?? account?.userId ?? userId;
       riotProfileIconId = account?.riot?.profileIconId ?? null;
       isLolAccount = account?.riot?.isLolAccount === true;
+      adminRole = account?.adminRole ?? "";
     } catch (err) {
       if (err instanceof AxiosError) {
         if (err?.response != null) {
@@ -121,6 +129,7 @@
         accountLoading = false;
         riotProfileIconId = null;
         isLolAccount = false;
+        adminRole = "";
       }
     });
   });
@@ -172,7 +181,7 @@
         <button
           class="menu-item user-menu-item account-trigger"
           class:open={accountMenuOpen}
-          class:selected={currentPage.key === HeaderMenus.account.key}
+          class:selected={currentPage.key === HeaderMenus.account.key || currentPage.key === HeaderMenus.admin.key}
           on:click|stopPropagation={() => (accountMenuOpen = !accountMenuOpen)}
         >
           <span class="account-icon">
@@ -192,6 +201,7 @@
         {#if accountMenuOpen}
           <div class="account-dropdown" on:click|stopPropagation>
             <button on:click={goToAccount}>내 정보</button>
+            {#if adminRole}<button on:click={goToAdmin}>운영 관리자</button>{/if}
             <button class="logout" on:click={tryLogout}>로그아웃</button>
           </div>
         {/if}

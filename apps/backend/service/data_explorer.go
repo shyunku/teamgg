@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	log "github.com/shyunku-libraries/go-logger"
@@ -533,15 +534,35 @@ func (de *DataExplorer) updateMetricAlerts(checks []dataExplorerMetricCheck) {
 				"event=data_explorer_alert state=firing metric=%s value=%d threshold=%d",
 				check.name, check.value, check.threshold,
 			)
+			de.recordMetricAlert("warning", "firing", check)
 		case !firing && wasFiring:
 			log.Infof(
 				"event=data_explorer_alert state=recovered metric=%s value=%d threshold=%d",
 				check.name, check.value, check.threshold,
 			)
+			de.recordMetricAlert("info", "recovered", check)
 		}
 		de.metricAlertStates[check.name] = firing
 	}
 }
+
+func (de *DataExplorer) recordMetricAlert(level, state string, check dataExplorerMetricCheck) {
+	details, err := json.Marshal(map[string]interface{}{
+		"metric": check.name, "state": state, "value": check.value, "threshold": check.threshold,
+	})
+	if err != nil {
+		return
+	}
+	detailsJson := string(details)
+	if err := models.InsertAdminOperationalEvent(db.Root, &models.AdminOperationalEventDAO{
+		Source: "data_explorer", Level: level, EventType: "data_explorer_alert",
+		Message:     fmt.Sprintf("%s %s (value=%d threshold=%d)", check.name, state, check.value, check.threshold),
+		DetailsJson: &detailsJson,
+	}); err != nil {
+		log.Errorf("event=data_explorer_alert_persist result=failed error=%v", err)
+	}
+}
+
 func (de *DataExplorer) logJob(kind, id, result string, count int64) {
 	if !de.debugEnabled || (count > 10 && count%100 != 0) {
 		return

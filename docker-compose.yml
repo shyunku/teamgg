@@ -60,6 +60,34 @@ services:
       retries: 5
       start_period: 10s
 
+  admin:
+    build:
+      context: ./apps/admin
+      dockerfile: Dockerfile
+      target: runtime
+    init: true
+    restart: unless-stopped
+    env_file:
+      - ${ADMIN_ENV_FILE:-./apps/admin/.env}
+    environment:
+      HOST: 0.0.0.0
+      PORT: 7730
+      TEAMGG_API_BASE_URL: http://backend:7713
+      REPLAY_ANALYZER_BASE_URL: http://replay-analyzer:7720
+    ports:
+      - "${ADMIN_BIND_ADDRESS:-127.0.0.1}:${ADMIN_PUBLISHED_PORT:-7730}:7730"
+    depends_on:
+      backend:
+        condition: service_healthy
+      replay-analyzer:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:7730/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   frontend:
     profiles: ["development"]
     build:
@@ -75,6 +103,8 @@ services:
       backend:
         condition: service_healthy
       replay-analyzer:
+        condition: service_healthy
+      admin:
         condition: service_healthy
     volumes:
       - ./apps/frontend:/app

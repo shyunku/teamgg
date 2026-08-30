@@ -630,7 +630,12 @@ func GetMyAccount(c *gin.Context) {
 		rsoInfo["accounts"] = rsoAccounts
 		rsoInfo["canUnlink"] = canUnlink
 	}
-	c.JSON(http.StatusOK, gin.H{"uid": userDAO.Uid, "userId": userDAO.UserId, "displayName": displayName, "riot": rsoInfo})
+	adminRole, _, roleErr := resolveAdminRole(uid)
+	if roleErr != nil {
+		log.Error(roleErr)
+		adminRole = ""
+	}
+	c.JSON(http.StatusOK, gin.H{"uid": userDAO.Uid, "userId": userDAO.UserId, "displayName": displayName, "riot": rsoInfo, "adminRole": adminRole})
 }
 
 func UnlinkRiotAccount(c *gin.Context) {

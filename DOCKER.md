@@ -1,6 +1,6 @@
 # Running team.gg with Docker
 
-This Compose stack runs the frontend, backend, and ROFL replay analyzer. MySQL and Redis are expected to run on the Docker host or external infrastructure.
+This Compose stack runs the frontend, backend, ROFL replay analyzer, and administrator operations API. MySQL and Redis are expected to run on the Docker host or external infrastructure.
 
 ## Initial setup
 
@@ -10,6 +10,7 @@ Create the Compose and service environment files from the repository root.
 Copy-Item .env.example .env
 Copy-Item apps/backend/.env.docker.example apps/backend/.env.docker
 Copy-Item apps/lol-replay-analyzer/.env.docker.example apps/lol-replay-analyzer/.env.docker
+Copy-Item apps/admin/.env.docker.example apps/admin/.env.docker
 ```
 
 Each file has a separate responsibility:
@@ -17,6 +18,7 @@ Each file has a separate responsibility:
 - `.env`: published ports, bind addresses, and service environment file paths; do not put application secrets here
 - `apps/backend/.env.docker`: database, Redis, Riot API, RSO, JWT, and backend runtime settings
 - `apps/lol-replay-analyzer/.env.docker`: OpenAI, upload, decoder, and analyzer runtime settings
+- `apps/admin/.env.docker`: administrator API origins, service endpoints, and its backend shared secret
 - `apps/frontend/.env.dev` and `.env.production`: existing frontend build settings
 
 To reuse an existing non-Docker service `.env`, change only the paths in the root `.env`:
@@ -24,6 +26,7 @@ To reuse an existing non-Docker service `.env`, change only the paths in the roo
 ```dotenv
 BACKEND_ENV_FILE=./apps/backend/.env
 ANALYZER_ENV_FILE=./apps/lol-replay-analyzer/.env
+ADMIN_ENV_FILE=./apps/admin/.env
 ```
 
 Pay particular attention to these settings:
@@ -34,6 +37,9 @@ Pay particular attention to these settings:
 - `REPLAY_ANALYZER_BASE_URL`: the analyzer URL returned to browsers; use `http://localhost:7720` in development and a public HTTPS URL in production
 - `CORS_ORIGINS`: use `http://localhost:8080` in development and `https://teamgg.kr,https://www.teamgg.kr` in production
 - `TEAMGG_API_BASE_URL`: Compose overrides this with the internal URL `http://backend:7713`, so it normally does not need to be changed
+- `ADMIN_INTERNAL_SECRET`: use the same separate random value in the backend and admin environments; do not reuse JWT or replay secrets
+- `ADMIN_BOOTSTRAP_USER_IDS`: optional comma-separated backend uid or login ID list for granting the first administrator access
+- `APP_ADMIN_SERVER_HOST`: add the public admin API URL to frontend `.env.dev` and `.env.production`; if omitted, ordinary pages still work and only the admin page reports a configuration error
 
 Generate a shared secret with the analyzer utility:
 
@@ -42,7 +48,7 @@ Set-Location apps/lol-replay-analyzer
 npm run generate:secret
 ```
 
-## Development: run all three services
+## Development: run all four services
 
 ```powershell
 docker compose --profile development up --build
@@ -51,14 +57,15 @@ docker compose --profile development up --build
 - Frontend: http://localhost:8080
 - Backend: http://localhost:7713
 - Replay analyzer: http://localhost:7720
+- Admin operations API: http://localhost:7730 (bound to loopback by default)
 
 The frontend source is bind-mounted and uses Rollup watch with live reload. Rebuild the backend and analyzer images after changing their source code:
 
 ```powershell
-docker compose up -d --build backend replay-analyzer
+docker compose up -d --build backend replay-analyzer admin
 ```
 
-## Production: run only the two server services
+## Production: run only the three server services
 
 Set the following values in `apps/backend/.env.docker`:
 
@@ -76,17 +83,21 @@ NODE_ENV=production
 CORS_ORIGINS=https://teamgg.kr,https://www.teamgg.kr
 ```
 
+Set the same long random ADMIN_INTERNAL_SECRET in both apps/backend/.env.docker and apps/admin/.env.docker. Set ADMIN_ALLOWED_ORIGINS to the production frontend origins, and add the first administrator team.gg uid or login ID to backend ADMIN_BOOTSTRAP_USER_IDS. After assigning a row in user_roles, the bootstrap list can be removed.
+
 Restrict the published server ports to the reverse proxy in the root `.env`:
 
 ```dotenv
 BACKEND_BIND_ADDRESS=127.0.0.1
 ANALYZER_BIND_ADDRESS=127.0.0.1
+ADMIN_BIND_ADDRESS=127.0.0.1
 ```
 
-The frontend belongs to the `development` profile, so this command starts only the backend and replay analyzer:
+The frontend belongs to the `development` profile, so this command starts only the three server services:
 
 ```bash
-docker compose up -d --build backend replay-analyzer
+docker compose run --rm backend migrate
+docker compose up -d --build backend replay-analyzer admin
 ```
 
 Configure the production reverse proxy with at least a `250m` request body limit for replay uploads, a read timeout longer than `ANALYSIS_TIMEOUT`, and disabled buffering for SSE responses. Use HTTPS for both public APIs and keep the container ports bound to loopback whenever possible.
@@ -108,10 +119,10 @@ Upload `public/`; the production bundle is generated under `public/build/product
 docker compose ps
 
 # Logs
-docker compose logs -f backend replay-analyzer
+docker compose logs -f backend replay-analyzer admin
 
 # Restart
-docker compose restart backend replay-analyzer
+docker compose restart backend replay-analyzer admin
 
 # Stop the development stack
 docker compose --profile development down

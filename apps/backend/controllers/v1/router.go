@@ -20,6 +20,7 @@ func UseV1Router(r *gin.Engine) {
 	UseIconRouter(g)
 	UseAuthRouter(g)
 	useReplayAnalysisInternalRouter(g)
+	useAdminInternalRouter(g)
 	platform.UsePlatformRouter(g)
 	api2.UseApiRouter(g)
 
