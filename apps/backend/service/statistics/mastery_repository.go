@@ -2,7 +2,6 @@ package statistics
 
 import (
 	"context"
-	"fmt"
 	log "github.com/shyunku-libraries/go-logger"
 	"strconv"
 	"sync"
@@ -126,8 +125,11 @@ func (msr *MasteryStatisticsRepository) collect(database db.Context) (*MasterySt
 		if _, exists := masteryMap[masteryMXDAO.ChampionId]; !exists {
 			champion, exists := service.Champions[strconv.Itoa(masteryMXDAO.ChampionId)]
 			if !exists {
-				log.Errorf("champion not found: %d", masteryMXDAO.ChampionId)
-				return nil, fmt.Errorf("champion not found: %d", masteryMXDAO.ChampionId)
+				// Riot may return non-champion mastery identifiers for rotating or
+				// experimental content. Keep the source row, but do not let an ID
+				// absent from the current Data Dragon block the public statistics.
+				log.Warnf("Skipping mastery statistics for unknown champion id: %d", masteryMXDAO.ChampionId)
+				continue
 			}
 
 			masteryMap[masteryMXDAO.ChampionId] = MasteryStatisticsItem{
@@ -146,8 +148,7 @@ func (msr *MasteryStatisticsRepository) collect(database db.Context) (*MasterySt
 	for _, masteryTopRankerMXDAO := range masteryTopRankersMXDAO {
 		mastery, exists := masteryMap[masteryTopRankerMXDAO.ChampionId]
 		if !exists {
-			log.Errorf("mastery not found: %d", masteryTopRankerMXDAO.ChampionId)
-			return nil, fmt.Errorf("mastery not found: %d", masteryTopRankerMXDAO.ChampionId)
+			continue
 		}
 		mastery.Rankers = append(mastery.Rankers, MasteryStatisticsTopSummoners{
 			Puuid:          masteryTopRankerMXDAO.Puuid,
