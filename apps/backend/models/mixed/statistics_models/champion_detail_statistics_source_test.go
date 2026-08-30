@@ -177,3 +177,20 @@ func TestChampionDetailQueriesUseIncrementalSources(t *testing.T) {
 		})
 	}
 }
+
+func TestChampionDetailExactMatchBatchesUsePrimaryIndex(t *testing.T) {
+	for name, query := range map[string]string{
+		"participants": populateChampionDetailParticipantBatchQuery,
+		"bans":         populateChampionDetailBanBatchQuery,
+		"processed":    markChampionDetailProcessedMatchesQuery,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !strings.Contains(query, "FORCE INDEX (PRIMARY)") {
+				t.Fatalf("%s exact-match query does not force primary-key lookup", name)
+			}
+			if strings.Contains(query, "FORCE INDEX (matches_game_version_index)") {
+				t.Fatalf("%s exact-match query still forces a full version range scan", name)
+			}
+		})
+	}
+}

@@ -56,7 +56,7 @@ const populateChampionDetailParticipantBatchQuery = `
 	)
 	WITH BoundMatches AS (
 		SELECT match_id, game_version, game_duration
-		FROM matches FORCE INDEX (matches_game_version_index)
+		FROM matches FORCE INDEX (PRIMARY)
 		WHERE game_version = ? AND match_id IN (?)
 	), BoundParticipants AS (
 		SELECT
@@ -237,11 +237,18 @@ const populateChampionDetailBanBatchQuery = `
 	INSERT INTO champion_detail_statistics_bans
 		(game_version, match_id, team_id, champion_id, pick_turn)
 	SELECT match_row.game_version, ban.match_id, ban.team_id, ban.champion_id, ban.pick_turn
-	FROM matches match_row FORCE INDEX (matches_game_version_index)
+	FROM matches match_row FORCE INDEX (PRIMARY)
 	INNER JOIN match_team_bans ban ON ban.match_id = match_row.match_id
 	WHERE match_row.game_version = ? AND match_row.match_id IN (?)
 	ON DUPLICATE KEY UPDATE
 		game_version = VALUES(game_version), champion_id = VALUES(champion_id)
+`
+
+const markChampionDetailProcessedMatchesQuery = `
+	INSERT IGNORE INTO champion_detail_statistics_processed_matches (game_version, match_id)
+	SELECT game_version, match_id
+	FROM matches FORCE INDEX (PRIMARY)
+	WHERE game_version = ? AND match_id IN (?)
 `
 
 func PrepareIncrementalChampionDetailStatisticsSource(
@@ -389,12 +396,7 @@ func populateChampionDetailSourceBatch(database db.Context, version string, matc
 	if _, err := database.Exec(database.Rebind(banQuery), banArgs...); err != nil {
 		return fmt.Errorf("populate champion detail ban batch for %s: %w", version, err)
 	}
-	processedQuery, processedArgs, err := sqlx.In(`
-		INSERT IGNORE INTO champion_detail_statistics_processed_matches (game_version, match_id)
-		SELECT game_version, match_id
-		FROM matches FORCE INDEX (matches_game_version_index)
-		WHERE game_version = ? AND match_id IN (?)
-	`, version, matchIds)
+	processedQuery, processedArgs, err := sqlx.In(markChampionDetailProcessedMatchesQuery, version, matchIds)
 	if err != nil {
 		return fmt.Errorf("bind champion detail processed matches for %s: %w", version, err)
 	}
