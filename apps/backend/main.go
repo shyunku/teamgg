@@ -145,27 +145,8 @@ func main() {
 		log.Info("Debug diagnostics are enabled...")
 	}
 
-	// Init in-memory database
-	log.Info("Initializing in-memory database...")
-	db.InMemoryDB = db.NewRedis()
-
-	// Init 3rd party services
-	log.Info("Initializing 3rd party services...")
-	riot.Init()
-
-	// Init jwt secret key
-	log.Info("Initializing jwt secret key...")
-	crypto.Initialize()
-
-	// randomize seed
-	rand.Seed(time.Now().UnixNano())
-
-	// Start data explorer
-	log.Info("Starting data explorer...")
-	de := service.NewDataExplorer()
-	go de.Loop()
-
-	// initialize statistics repository
+	// Initialize statistics repositories before optional background services so
+	// the one-shot maintenance command cannot start DataExplorer workers.
 	log.Info("Initializing statistics repository...")
 	if err := statistics.InitializeStatisticRepos(); err != nil {
 		log.Error(err)
@@ -188,6 +169,26 @@ func main() {
 		}
 		return
 	}
+
+	// Init in-memory database
+	log.Info("Initializing in-memory database...")
+	db.InMemoryDB = db.NewRedis()
+
+	// Init 3rd party services
+	log.Info("Initializing 3rd party services...")
+	riot.Init()
+
+	// Init jwt secret key
+	log.Info("Initializing jwt secret key...")
+	crypto.Initialize()
+
+	// randomize seed
+	rand.Seed(time.Now().UnixNano())
+
+	// Start data explorer
+	log.Info("Starting data explorer...")
+	de := service.NewDataExplorer()
+	go de.Loop()
 
 	// start statistics repository loop
 	log.Info("Starting statistics repository loops...")
