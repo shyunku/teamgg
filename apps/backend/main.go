@@ -59,6 +59,7 @@ func main() {
 	}
 
 	migrationOnly := len(os.Args) > 1 && strings.EqualFold(os.Args[1], "migrate")
+	championDetailCollectionOnly := len(os.Args) > 1 && strings.EqualFold(os.Args[1], "collect-champion-detail")
 	requiredEnvironment := []string{
 		"DB_USER", "DB_PASSWORD", "DB_HOST", "DB_PORT", "DB_NAME",
 	}
@@ -169,6 +170,23 @@ func main() {
 	if err := statistics.InitializeStatisticRepos(); err != nil {
 		log.Error(err)
 		os.Exit(-6)
+	}
+	if championDetailCollectionOnly {
+		log.Info("Running one-shot champion detail statistics collection...")
+		if err := statistics.ChampionDetailStatisticsRepo.CollectUntilReady(ctx); err != nil {
+			log.Error(err)
+			os.Exit(-6)
+		}
+		log.Info("One-shot champion detail statistics collection completed")
+		if err := statistics.StatisticsDB.Finalize(); err != nil {
+			log.Error(err)
+			os.Exit(-5)
+		}
+		if err := db.Root.Finalize(); err != nil {
+			log.Error(err)
+			os.Exit(-4)
+		}
+		return
 	}
 
 	// start statistics repository loop

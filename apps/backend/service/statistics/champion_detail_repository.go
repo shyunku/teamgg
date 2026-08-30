@@ -2,6 +2,7 @@ package statistics
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	uuid2 "github.com/google/uuid"
 	log "github.com/shyunku-libraries/go-logger"
@@ -226,6 +227,26 @@ func (cdsr *ChampionDetailStatisticsRepository) Loop(ctx context.Context) {
 
 func (cdsr *ChampionDetailStatisticsRepository) Collect() (*ChampionDetailStatistics, error) {
 	return cdsr.collectCoordinated(context.Background())
+}
+
+// CollectUntilReady runs bounded source preparation cycles until one complete
+// snapshot has been collected. It is used by the one-shot maintenance command,
+// which exits immediately after success instead of starting a recurring loop.
+func (cdsr *ChampionDetailStatisticsRepository) CollectUntilReady(ctx context.Context) error {
+	for {
+		_, _, err := cdsr.collectCoordinatedScheduled(ctx)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, ErrStatisticsCollectionPending) && !errors.Is(err, ErrStatisticsCollectionLocked) {
+			return err
+		}
+		log.Infof("Statistics %s one-shot collection is not ready; continuing in %s: %v",
+			cdsr.key(), cdsr.config.LockRetryDelay, err)
+		if !waitContext(ctx, cdsr.config.LockRetryDelay) {
+			return ctx.Err()
+		}
+	}
 }
 
 func (cdsr *ChampionDetailStatisticsRepository) collectCoordinated(ctx context.Context) (*ChampionDetailStatistics, error) {
