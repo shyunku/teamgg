@@ -23,6 +23,8 @@ type MatchDAO struct {
 	PlatformId         string `db:"platform_id" json:"platformId"`
 	QueueId            int    `db:"queue_id" json:"queueId"`
 	TournamentCode     string `db:"tournament_code" json:"tournamentCode"`
+
+	MatchPk sql.NullInt64 `db:"match_pk" json:"-"`
 }
 
 func (m *MatchDAO) Insert(db db.Context) error {

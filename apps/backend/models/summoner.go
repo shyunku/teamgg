@@ -17,6 +17,8 @@ type SummonerDAO struct {
 	SummonerLevel   int64     `db:"summoner_level" json:"summonerLevel"`
 	ShortenGameName string    `db:"shorten_game_name" json:"shortenGameName"`
 	LastUpdatedAt   time.Time `db:"last_updated_at" json:"lastUpdatedAt"`
+
+	SummonerPk sql.NullInt64 `db:"summoner_pk" json:"-"`
 }
 
 func (s *SummonerDAO) Upsert(db db.Context) error {

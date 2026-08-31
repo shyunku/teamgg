@@ -25,6 +25,8 @@ type MatchParticipantExtraMXDAO struct {
 	QueueId            int    `db:"queue_id" json:"queueId"`
 	TournamentCode     string `db:"tournament_code" json:"tournamentCode"`
 
+	MatchPk sql.NullInt64 `db:"match_pk" json:"-"`
+
 	// participant
 	None0                          *string `db:"match_id" json:"none0"`
 	ParticipantId                  int     `db:"participant_id" json:"participantId"`
@@ -88,6 +90,10 @@ type MatchParticipantExtraMXDAO struct {
 	GameEndedInEarlySurrender      bool    `db:"game_ended_in_early_surrender" json:"gameEndedInEarlySurrender"`
 	GameEndedInSurrender           bool    `db:"game_ended_in_surrender" json:"gameEndedInSurrender"`
 	TeamEarlySurrendered           bool    `db:"team_early_surrendered" json:"teamEarlySurrendered"`
+
+	MatchParticipantPk sql.NullInt64 `db:"match_participant_pk" json:"-"`
+	MatchFk            sql.NullInt64 `db:"match_fk" json:"-"`
+	SummonerFk         sql.NullInt64 `db:"summoner_fk" json:"-"`
 
 	//	Details
 	None1                          *string `db:"mpd.match_participant_id" json:"none1"`

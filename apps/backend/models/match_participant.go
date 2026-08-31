@@ -11,6 +11,10 @@ type MatchParticipantDAO struct {
 	ParticipantId      int    `db:"participant_id" json:"participantId"`
 	MatchParticipantId string `db:"match_participant_id" json:"matchParticipantId"`
 
+	MatchParticipantPk sql.NullInt64 `db:"match_participant_pk" json:"-"`
+	MatchFk            sql.NullInt64 `db:"match_fk" json:"-"`
+	SummonerFk         sql.NullInt64 `db:"summoner_fk" json:"-"`
+
 	Puuid string `db:"puuid" json:"puuid"`
 
 	Kills   int `db:"kills" json:"kills"`
