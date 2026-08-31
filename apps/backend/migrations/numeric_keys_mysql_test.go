@@ -99,6 +99,9 @@ func TestNumericKeyFoundationAndBackfillMySQL(t *testing.T) {
 		`INSERT INTO match_participants
 			(match_id, participant_id, match_participant_id, puuid)
 		 VALUES ('KR_legacy', 1, 'legacy-participant', 'legacy-puuid')`,
+		`INSERT INTO match_participants
+			(match_id, participant_id, match_participant_id, puuid)
+		 VALUES ('KR_legacy', 2, 'legacy-orphan-participant', 'legacy-orphan-puuid')`,
 		`INSERT INTO masteries VALUES ('legacy-puuid', 1)`,
 		`INSERT INTO leagues VALUES ('legacy-puuid', 'league', 'RANKED_SOLO_5x5')`,
 		`INSERT INTO summoner_matches VALUES ('legacy-puuid', 'KR_legacy')`,
@@ -164,6 +167,23 @@ func TestNumericKeyFoundationAndBackfillMySQL(t *testing.T) {
 	}
 	if !result.Ready || !result.SummonersCompleted || !result.MatchesCompleted || !result.ParticipantsCompleted || !result.ChildrenCompleted {
 		t.Fatalf("unexpected first backfill result: %+v", result)
+	}
+	var orphanSourceExists bool
+	var orphanSummonerId, orphanParticipantSummonerId int64
+	if err := database.QueryRowxContext(ctx, `
+		SELECT EXISTS(SELECT 1 FROM summoners WHERE puuid = 'legacy-orphan-puuid'),
+			numeric_key.summoner_id, participant.summoner_fk
+		FROM match_participants participant
+		INNER JOIN summoner_numeric_keys numeric_key ON numeric_key.puuid = participant.puuid
+		WHERE participant.match_participant_id = 'legacy-orphan-participant'
+	`).Scan(&orphanSourceExists, &orphanSummonerId, &orphanParticipantSummonerId); err != nil {
+		t.Fatal(err)
+	}
+	if orphanSourceExists || orphanSummonerId == 0 || orphanSummonerId != orphanParticipantSummonerId {
+		t.Fatalf(
+			"legacy orphan identity was not reserved consistently: source=%t key=%d participant=%d",
+			orphanSourceExists, orphanSummonerId, orphanParticipantSummonerId,
+		)
 	}
 	childrenReady, err := validateNumericKeyChildrenBackfill(ctx, database)
 	if err != nil || !childrenReady {

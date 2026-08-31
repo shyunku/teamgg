@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -50,6 +51,7 @@ type participantNumericKeyRow struct {
 	MatchId           string        `db:"match_id"`
 	ParticipantId     int           `db:"participant_id"`
 	LegacyParticipant string        `db:"match_participant_id"`
+	Puuid             string        `db:"puuid"`
 	MatchNumericId    sql.NullInt64 `db:"match_numeric_id"`
 	SummonerNumericId sql.NullInt64 `db:"summoner_numeric_id"`
 }
@@ -420,23 +422,12 @@ func backfillParticipantNumericKeys(ctx context.Context, database *sqlx.DB, dead
 	for time.Now().Before(deadline) {
 		rows := make([]participantNumericKeyRow, 0, batchSize)
 		query := `
-			SELECT participant.match_id, participant.participant_id,
-				participant.match_participant_id,
-				match_key.match_id AS match_numeric_id,
-				summoner_key.summoner_id AS summoner_numeric_id
-			FROM (
-				SELECT match_id, participant_id, match_participant_id, puuid
-				FROM match_participants FORCE INDEX (PRIMARY)
-				WHERE (match_participant_pk IS NULL OR match_fk IS NULL OR summoner_fk IS NULL)
-				  AND (match_id > ? OR (match_id = ? AND participant_id > ?))
-				ORDER BY match_id, participant_id
-				LIMIT ?
-			) participant
-			LEFT JOIN match_numeric_keys match_key
-				ON match_key.riot_match_id = participant.match_id
-			LEFT JOIN summoner_numeric_keys summoner_key
-				ON summoner_key.puuid = participant.puuid
-			ORDER BY participant.match_id, participant.participant_id`
+			SELECT match_id, participant_id, match_participant_id, puuid
+			FROM match_participants FORCE INDEX (PRIMARY)
+			WHERE (match_participant_pk IS NULL OR match_fk IS NULL OR summoner_fk IS NULL)
+			  AND (match_id > ? OR (match_id = ? AND participant_id > ?))
+			ORDER BY match_id, participant_id
+			LIMIT ?`
 		if err := database.SelectContext(ctx, &rows, query, progress.CursorText, progress.CursorText, progress.CursorNumber, batchSize); err != nil {
 			return false, processedThisRun, err
 		}
@@ -483,10 +474,21 @@ func upsertParticipantNumericKeyBatch(
 	tx *sqlx.Tx,
 	rows []participantNumericKeyRow,
 ) error {
+	matchIds, summonerIds, err := reserveParticipantParentNumericKeys(ctx, tx, rows)
+	if err != nil {
+		return err
+	}
 	placeholders := make([]string, 0, len(rows))
 	insertArgs := make([]interface{}, 0, len(rows)*4)
 	legacyKeys := make([]string, 0, len(rows))
-	for _, row := range rows {
+	for index := range rows {
+		row := &rows[index]
+		if numericId, ok := matchIds[row.MatchId]; ok {
+			row.MatchNumericId = sql.NullInt64{Int64: numericId, Valid: true}
+		}
+		if numericId, ok := summonerIds[row.Puuid]; ok {
+			row.SummonerNumericId = sql.NullInt64{Int64: numericId, Valid: true}
+		}
 		if !row.MatchNumericId.Valid || !row.SummonerNumericId.Valid {
 			return fmt.Errorf(
 				"participant %s/%d has no matching numeric parent key",
@@ -563,6 +565,101 @@ func upsertParticipantNumericKeyBatch(
 		}
 	}
 	return nil
+}
+
+func reserveParticipantParentNumericKeys(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	rows []participantNumericKeyRow,
+) (map[string]int64, map[string]int64, error) {
+	matchKeys := make([]string, 0, len(rows))
+	summonerKeys := make([]string, 0, len(rows))
+	for _, row := range rows {
+		matchKeys = append(matchKeys, row.MatchId)
+		summonerKeys = append(summonerKeys, row.Puuid)
+	}
+	matchKeys = uniqueSortedStrings(matchKeys)
+	summonerKeys = uniqueSortedStrings(summonerKeys)
+	if err := reserveNumericKeyIdentities(ctx, tx, "match_numeric_keys", "riot_match_id", matchKeys); err != nil {
+		return nil, nil, err
+	}
+	if err := reserveNumericKeyIdentities(ctx, tx, "summoner_numeric_keys", "puuid", summonerKeys); err != nil {
+		return nil, nil, err
+	}
+	matchIds, err := loadNumericKeyIdentities(
+		ctx, tx, "match_numeric_keys", "riot_match_id", "match_id", matchKeys,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	summonerIds, err := loadNumericKeyIdentities(
+		ctx, tx, "summoner_numeric_keys", "puuid", "summoner_id", summonerKeys,
+	)
+	return matchIds, summonerIds, err
+}
+
+func uniqueSortedStrings(values []string) []string {
+	unique := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		unique[value] = struct{}{}
+	}
+	result := make([]string, 0, len(unique))
+	for value := range unique {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func reserveNumericKeyIdentities(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	table, legacyColumn string,
+	keys []string,
+) error {
+	placeholders := make([]string, len(keys))
+	args := make([]interface{}, len(keys))
+	for index, key := range keys {
+		placeholders[index] = "(?)"
+		args[index] = key
+	}
+	query := fmt.Sprintf(`
+		INSERT INTO %s (%s) VALUES %s
+		ON DUPLICATE KEY UPDATE %s = VALUES(%s)
+	`, table, legacyColumn, strings.Join(placeholders, ","), legacyColumn, legacyColumn)
+	_, err := tx.ExecContext(ctx, tx.Rebind(query), args...)
+	return err
+}
+
+func loadNumericKeyIdentities(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	table, legacyColumn, numericColumn string,
+	keys []string,
+) (map[string]int64, error) {
+	type numericIdentity struct {
+		Legacy string `db:"legacy_key"`
+		Id     int64  `db:"numeric_id"`
+	}
+	query, args, err := sqlx.In(fmt.Sprintf(`
+		SELECT %s AS legacy_key, %s AS numeric_id
+		FROM %s WHERE %s IN (?)
+	`, legacyColumn, numericColumn, table, legacyColumn), keys)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]numericIdentity, 0, len(keys))
+	if err := tx.SelectContext(ctx, &rows, tx.Rebind(query), args...); err != nil {
+		return nil, err
+	}
+	result := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		result[row.Legacy] = row.Id
+	}
+	if len(result) != len(keys) {
+		return nil, fmt.Errorf("resolved %d of %d numeric identities from %s", len(result), len(keys), table)
+	}
+	return result, nil
 }
 
 type numericKeyProgressStore interface {
