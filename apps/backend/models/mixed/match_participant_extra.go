@@ -96,52 +96,54 @@ type MatchParticipantExtraMXDAO struct {
 	SummonerFk         sql.NullInt64 `db:"summoner_fk" json:"-"`
 
 	//	Details
-	None1                          *string `db:"mpd.match_participant_id" json:"none1"`
-	None2                          *string `db:"mpd.match_id" json:"none2"`
-	BaronKills                     int     `db:"baron_kills" json:"baronKills"`
-	BountyLevel                    int     `db:"bounty_level" json:"bountyLevel"`
-	ChampionTransform              int     `db:"champion_transform" json:"championTransform"`
-	ConsumablesPurchased           int     `db:"consumables_purchased" json:"consumablesPurchased"`
-	DamageDealtToBuildings         int     `db:"damage_dealt_to_buildings" json:"damageDealtToBuildings"`   // 건물에 입힌 피해량
-	DamageDealtToObjectives        int     `db:"damage_dealt_to_objectives" json:"damageDealtToObjectives"` // 목표물에 입힌 피해량
-	DamageDealtToTurrets           int     `db:"damage_dealt_to_turrets" json:"damageDealtToTurrets"`       // 포탑에 입힌 피해량
-	DamageSelfMitigated            int     `db:"damage_self_mitigated" json:"damageSelfMitigated"`          // 자신에 대한 피해 감소량
-	DetectorWardsPlaced            int     `db:"detector_wards_placed" json:"detectorWardsPlaced"`
-	DragonKills                    int     `db:"dragon_kills" json:"dragonKills"`
-	PhysicalDamageDealt            int     `db:"physical_damage_dealt" json:"physicalDamageDealt"`
-	MagicDamageDealt               int     `db:"magic_damage_dealt" json:"magicDamageDealt"`
-	TotalDamageDealt               int     `db:"total_damage_dealt" json:"totalDamageDealt"`
-	LargestCriticalStrike          int     `db:"largest_critical_strike" json:"largestCriticalStrike"`
-	LargestKillingSpree            int     `db:"largest_killing_spree" json:"largestKillingSpree"`
-	LargestMultiKill               int     `db:"largest_multi_kill" json:"largestMultiKill"`
-	FirstTowerAssist               bool    `db:"first_tower_assist" json:"firstTowerAssist"`
-	FirstTowerKill                 bool    `db:"first_tower_kill" json:"firstTowerKill"`
-	InhibitorKills                 int     `db:"inhibitor_kills" json:"inhibitorKills"`
-	InhibitorTakedowns             int     `db:"inhibitor_takedowns" json:"inhibitorTakedowns"`
-	InhibitorsLost                 int     `db:"inhibitors_lost" json:"inhibitorsLost"`
-	ItemsPurchased                 int     `db:"items_purchased" json:"itemsPurchased"`
-	KillingSprees                  int     `db:"killing_sprees" json:"killingSprees"`
-	NexusKills                     int     `db:"nexus_kills" json:"nexusKills"`
-	NexusTakedowns                 int     `db:"nexus_takedowns" json:"nexusTakedowns"`
-	NexusLost                      int     `db:"nexus_lost" json:"nexusLost"`
-	LongestTimeSpentLiving         int     `db:"longest_time_spent_living" json:"longestTimeSpentLiving"`
-	ObjectiveStolen                int     `db:"objective_stolen" json:"objectiveStolen"`
-	ObjectiveStolenAssists         int     `db:"objective_stolen_assists" json:"objectiveStolenAssists"`
-	SightWardsBoughtInGame         int     `db:"sight_wards_bought_in_game" json:"sightWardsBoughtInGame"`
-	VisionWardsBoughtInGame        int     `db:"vision_wards_bought_in_game" json:"visionWardsBoughtInGame"`
-	SummonerId                     string  `db:"summoner_id" json:"summonerId"`
-	TimeCCingOthers                int     `db:"time_ccing_others" json:"timeCCingOthers"`
-	TimePlayed                     int     `db:"time_played" json:"timePlayed"`
-	TotalDamageShieldedOnTeammates int     `db:"total_damage_shielded_on_teammates" json:"totalDamageShieldedOnTeammates"`
-	TotalTimeSpentDead             int     `db:"total_time_spent_dead" json:"totalTimeSpentDead"`
-	TotalUnitsHealed               int     `db:"total_units_healed" json:"totalUnitsHealed"`
-	TrueDamageDealt                int     `db:"true_damage_dealt" json:"trueDamageDealt"`
-	TurretKills                    int     `db:"turret_kills" json:"turretKills"`
-	TurretTakedowns                int     `db:"turret_takedowns" json:"turretTakedowns"`
-	TurretsLost                    int     `db:"turrets_lost" json:"turretsLost"`
-	UnrealKills                    int     `db:"unreal_kills" json:"unrealKills"`
-	WardsKilled                    int     `db:"wards_killed" json:"wardsKilled"`
-	WardsPlaced                    int     `db:"wards_placed" json:"wardsPlaced"`
+	None1                          *string       `db:"mpd.match_participant_id" json:"none1"`
+	None2                          *string       `db:"mpd.match_id" json:"none2"`
+	DetailMatchParticipantFk       sql.NullInt64 `db:"mpd.match_participant_fk" json:"-"`
+	DetailMatchFk                  sql.NullInt64 `db:"mpd.match_fk" json:"-"`
+	BaronKills                     int           `db:"baron_kills" json:"baronKills"`
+	BountyLevel                    int           `db:"bounty_level" json:"bountyLevel"`
+	ChampionTransform              int           `db:"champion_transform" json:"championTransform"`
+	ConsumablesPurchased           int           `db:"consumables_purchased" json:"consumablesPurchased"`
+	DamageDealtToBuildings         int           `db:"damage_dealt_to_buildings" json:"damageDealtToBuildings"`   // 건물에 입힌 피해량
+	DamageDealtToObjectives        int           `db:"damage_dealt_to_objectives" json:"damageDealtToObjectives"` // 목표물에 입힌 피해량
+	DamageDealtToTurrets           int           `db:"damage_dealt_to_turrets" json:"damageDealtToTurrets"`       // 포탑에 입힌 피해량
+	DamageSelfMitigated            int           `db:"damage_self_mitigated" json:"damageSelfMitigated"`          // 자신에 대한 피해 감소량
+	DetectorWardsPlaced            int           `db:"detector_wards_placed" json:"detectorWardsPlaced"`
+	DragonKills                    int           `db:"dragon_kills" json:"dragonKills"`
+	PhysicalDamageDealt            int           `db:"physical_damage_dealt" json:"physicalDamageDealt"`
+	MagicDamageDealt               int           `db:"magic_damage_dealt" json:"magicDamageDealt"`
+	TotalDamageDealt               int           `db:"total_damage_dealt" json:"totalDamageDealt"`
+	LargestCriticalStrike          int           `db:"largest_critical_strike" json:"largestCriticalStrike"`
+	LargestKillingSpree            int           `db:"largest_killing_spree" json:"largestKillingSpree"`
+	LargestMultiKill               int           `db:"largest_multi_kill" json:"largestMultiKill"`
+	FirstTowerAssist               bool          `db:"first_tower_assist" json:"firstTowerAssist"`
+	FirstTowerKill                 bool          `db:"first_tower_kill" json:"firstTowerKill"`
+	InhibitorKills                 int           `db:"inhibitor_kills" json:"inhibitorKills"`
+	InhibitorTakedowns             int           `db:"inhibitor_takedowns" json:"inhibitorTakedowns"`
+	InhibitorsLost                 int           `db:"inhibitors_lost" json:"inhibitorsLost"`
+	ItemsPurchased                 int           `db:"items_purchased" json:"itemsPurchased"`
+	KillingSprees                  int           `db:"killing_sprees" json:"killingSprees"`
+	NexusKills                     int           `db:"nexus_kills" json:"nexusKills"`
+	NexusTakedowns                 int           `db:"nexus_takedowns" json:"nexusTakedowns"`
+	NexusLost                      int           `db:"nexus_lost" json:"nexusLost"`
+	LongestTimeSpentLiving         int           `db:"longest_time_spent_living" json:"longestTimeSpentLiving"`
+	ObjectiveStolen                int           `db:"objective_stolen" json:"objectiveStolen"`
+	ObjectiveStolenAssists         int           `db:"objective_stolen_assists" json:"objectiveStolenAssists"`
+	SightWardsBoughtInGame         int           `db:"sight_wards_bought_in_game" json:"sightWardsBoughtInGame"`
+	VisionWardsBoughtInGame        int           `db:"vision_wards_bought_in_game" json:"visionWardsBoughtInGame"`
+	SummonerId                     string        `db:"summoner_id" json:"summonerId"`
+	TimeCCingOthers                int           `db:"time_ccing_others" json:"timeCCingOthers"`
+	TimePlayed                     int           `db:"time_played" json:"timePlayed"`
+	TotalDamageShieldedOnTeammates int           `db:"total_damage_shielded_on_teammates" json:"totalDamageShieldedOnTeammates"`
+	TotalTimeSpentDead             int           `db:"total_time_spent_dead" json:"totalTimeSpentDead"`
+	TotalUnitsHealed               int           `db:"total_units_healed" json:"totalUnitsHealed"`
+	TrueDamageDealt                int           `db:"true_damage_dealt" json:"trueDamageDealt"`
+	TurretKills                    int           `db:"turret_kills" json:"turretKills"`
+	TurretTakedowns                int           `db:"turret_takedowns" json:"turretTakedowns"`
+	TurretsLost                    int           `db:"turrets_lost" json:"turretsLost"`
+	UnrealKills                    int           `db:"unreal_kills" json:"unrealKills"`
+	WardsKilled                    int           `db:"wards_killed" json:"wardsKilled"`
+	WardsPlaced                    int           `db:"wards_placed" json:"wardsPlaced"`
 }
 
 func (m *MatchParticipantExtraMXDAO) GetScore() float64 {

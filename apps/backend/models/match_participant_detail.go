@@ -1,13 +1,16 @@
 package models
 
 import (
+	"database/sql"
 	"team.gg-server/libs/db"
 )
 
 type MatchParticipantDetailDAO struct {
-	MatchParticipantId string `db:"match_participant_id" json:"matchParticipantId"`
+	MatchParticipantId string        `db:"match_participant_id" json:"matchParticipantId"`
+	MatchParticipantFk sql.NullInt64 `db:"match_participant_fk" json:"-"`
 
-	MatchId string `db:"match_id" json:"matchId"`
+	MatchId string        `db:"match_id" json:"matchId"`
+	MatchFk sql.NullInt64 `db:"match_fk" json:"-"`
 
 	BaronKills  int `db:"baron_kills" json:"baronKills"`
 	BountyLevel int `db:"bounty_level" json:"bountyLevel"`

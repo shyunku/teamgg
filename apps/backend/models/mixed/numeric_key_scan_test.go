@@ -9,7 +9,10 @@ import (
 func TestMatchParticipantExtraAcceptsNumericKeyColumns(t *testing.T) {
 	modelType := reflect.TypeOf(MatchParticipantExtraMXDAO{})
 	nullInt64Type := reflect.TypeOf(sql.NullInt64{})
-	columns := []string{"match_pk", "match_participant_pk", "match_fk", "summoner_fk"}
+	columns := []string{
+		"match_pk", "match_participant_pk", "match_fk", "summoner_fk",
+		"mpd.match_participant_fk", "mpd.match_fk",
+	}
 
 	for _, column := range columns {
 		found := false

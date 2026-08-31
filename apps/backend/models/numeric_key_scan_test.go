@@ -22,6 +22,14 @@ func TestNumericKeyColumnsHaveNullableScanDestinations(t *testing.T) {
 				"match_participant_pk", "match_fk", "summoner_fk",
 			},
 		},
+		{name: "mastery", model: MasteryDAO{}, columns: []string{"summoner_fk"}},
+		{name: "league", model: LeagueDAO{}, columns: []string{"summoner_fk"}},
+		{name: "summoner match", model: SummonerMatchDAO{}, columns: []string{"summoner_fk", "match_fk"}},
+		{name: "participant detail", model: MatchParticipantDetailDAO{}, columns: []string{"match_participant_fk", "match_fk"}},
+		{name: "participant perks", model: MatchParticipantPerkDAO{}, columns: []string{"match_participant_fk"}},
+		{name: "participant perk style", model: MatchParticipantPerkStyleDAO{}, columns: []string{"match_participant_fk"}},
+		{name: "match team", model: MatchTeamDAO{}, columns: []string{"match_fk"}},
+		{name: "match team ban", model: MatchTeamBanDAO{}, columns: []string{"match_fk"}},
 	}
 
 	for _, test := range tests {

@@ -122,11 +122,12 @@ func main() {
 			os.Exit(-4)
 		}
 		log.Infof(
-			"Numeric key backfill finished: ready=%t summoners=%d/%t matches=%d/%t participants=%d/%t",
+			"Numeric key backfill finished: ready=%t summoners=%d/%t matches=%d/%t participants=%d/%t children=%d/%t",
 			result.Ready,
 			result.SummonersProcessed, result.SummonersCompleted,
 			result.MatchesProcessed, result.MatchesCompleted,
 			result.ParticipantsProcessed, result.ParticipantsCompleted,
+			result.ChildrenProcessed, result.ChildrenCompleted,
 		)
 		if err := db.Root.Close(); err != nil {
 			log.Error(err)

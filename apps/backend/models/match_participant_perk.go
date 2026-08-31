@@ -1,11 +1,13 @@
 package models
 
 import (
+	"database/sql"
 	"team.gg-server/libs/db"
 )
 
 type MatchParticipantPerkDAO struct {
-	MatchParticipantId string `db:"match_participant_id" json:"matchParticipantId"`
+	MatchParticipantId string        `db:"match_participant_id" json:"matchParticipantId"`
+	MatchParticipantFk sql.NullInt64 `db:"match_participant_fk" json:"-"`
 
 	StatPerkDefense int `db:"stat_perk_defense" json:"statPerkDefense"`
 	StatPerkFlex    int `db:"stat_perk_flex" json:"statPerkFlex"`

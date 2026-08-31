@@ -1,13 +1,15 @@
 package models
 
 import (
+	"database/sql"
 	"team.gg-server/libs/db"
 )
 
 type MatchTeamDAO struct {
-	MatchId string `db:"match_id" json:"matchId"`
-	TeamId  int    `db:"team_id" json:"teamId"`
-	Win     bool   `db:"win" json:"win"`
+	MatchId string        `db:"match_id" json:"matchId"`
+	MatchFk sql.NullInt64 `db:"match_fk" json:"-"`
+	TeamId  int           `db:"team_id" json:"teamId"`
+	Win     bool          `db:"win" json:"win"`
 
 	BaronFirst      bool `db:"baron_first" json:"baronFirst"`
 	BaronKills      int  `db:"baron_kills" json:"baronKills"`

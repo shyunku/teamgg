@@ -35,6 +35,8 @@ type NumericKeyBackfillResult struct {
 	SummonersCompleted    bool
 	MatchesCompleted      bool
 	ParticipantsCompleted bool
+	ChildrenProcessed     int64
+	ChildrenCompleted     bool
 }
 
 type numericKeyProgress struct {
@@ -313,7 +315,17 @@ func BackfillNumericKeys(ctx context.Context, database *sqlx.DB, options Numeric
 		return result, err
 	}
 
-	result.Ready, err = validateNumericKeyBackfill(ctx, database)
+	parentsReady, err := validateNumericKeyBackfill(ctx, database)
+	if err != nil || !parentsReady {
+		return result, err
+	}
+	result.ChildrenCompleted, result.ChildrenProcessed, err = backfillNumericKeyChildren(
+		ctx, database, deadline, options.BatchSize,
+	)
+	if err != nil || !result.ChildrenCompleted {
+		return result, err
+	}
+	result.Ready, err = validateNumericKeyChildrenBackfill(ctx, database)
 	return result, err
 }
 
@@ -575,15 +587,12 @@ func validateNumericKeyBackfill(ctx context.Context, database *sqlx.DB) (bool, e
 		`SELECT COUNT(*) FROM match_participants source
 		 LEFT JOIN match_participant_numeric_keys numeric_key
 		   ON numeric_key.legacy_match_participant_id = source.match_participant_id
-		 LEFT JOIN matches parent_match ON parent_match.match_id = source.match_id
-		 LEFT JOIN summoners parent_summoner ON parent_summoner.puuid = source.puuid
 		 WHERE source.match_participant_pk IS NULL OR source.match_fk IS NULL OR source.summoner_fk IS NULL
 		    OR numeric_key.match_participant_id IS NULL
+		    OR numeric_key.match_id IS NULL OR numeric_key.summoner_id IS NULL
 		    OR source.match_participant_pk <> numeric_key.match_participant_id
 		    OR source.match_fk <> numeric_key.match_id
-		    OR source.summoner_fk <> numeric_key.summoner_id
-		    OR source.match_fk <> parent_match.match_pk
-		    OR source.summoner_fk <> parent_summoner.summoner_pk`,
+		    OR source.summoner_fk <> numeric_key.summoner_id`,
 	}
 	for _, query := range checks {
 		var count int64

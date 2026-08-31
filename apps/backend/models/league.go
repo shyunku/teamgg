@@ -8,23 +8,24 @@ import (
 )
 
 type LeagueDAO struct {
-	Puuid        string     `db:"puuid" json:"puuid"`
-	LeagueId     string     `db:"league_id" json:"leagueId"`
-	QueueType    string     `db:"queue_type" json:"queueType"`
-	UpdatedAt    *time.Time `db:"updated_at" json:"updatedAt"`
-	Tier         string     `db:"tier" json:"tier"`
-	Rank         string     `db:"league_rank" json:"rank"`
-	LeaguePoints int        `db:"league_points" json:"leaguePoints"`
-	Wins         int        `db:"wins" json:"wins"`
-	Losses       int        `db:"losses" json:"losses"`
-	HotStreak    bool       `db:"hot_streak" json:"hotStreak"`
-	Veteran      bool       `db:"veteran" json:"veteran"`
-	FreshBlood   bool       `db:"fresh_blood" json:"freshBlood"`
-	Inactive     bool       `db:"inactive" json:"inactive"`
-	MsTarget     int        `db:"ms_target" json:"msTarget"`
-	MsWins       int        `db:"ms_wins" json:"msWins"`
-	MsLosses     int        `db:"ms_losses" json:"msLosses"`
-	MsProgress   string     `db:"ms_progress" json:"msProgress"`
+	Puuid        string        `db:"puuid" json:"puuid"`
+	SummonerFk   sql.NullInt64 `db:"summoner_fk" json:"-"`
+	LeagueId     string        `db:"league_id" json:"leagueId"`
+	QueueType    string        `db:"queue_type" json:"queueType"`
+	UpdatedAt    *time.Time    `db:"updated_at" json:"updatedAt"`
+	Tier         string        `db:"tier" json:"tier"`
+	Rank         string        `db:"league_rank" json:"rank"`
+	LeaguePoints int           `db:"league_points" json:"leaguePoints"`
+	Wins         int           `db:"wins" json:"wins"`
+	Losses       int           `db:"losses" json:"losses"`
+	HotStreak    bool          `db:"hot_streak" json:"hotStreak"`
+	Veteran      bool          `db:"veteran" json:"veteran"`
+	FreshBlood   bool          `db:"fresh_blood" json:"freshBlood"`
+	Inactive     bool          `db:"inactive" json:"inactive"`
+	MsTarget     int           `db:"ms_target" json:"msTarget"`
+	MsWins       int           `db:"ms_wins" json:"msWins"`
+	MsLosses     int           `db:"ms_losses" json:"msLosses"`
+	MsProgress   string        `db:"ms_progress" json:"msProgress"`
 }
 
 func (l *LeagueDAO) Upsert(db db.Context) error {

@@ -1,20 +1,22 @@
 package models
 
 import (
+	"database/sql"
 	"team.gg-server/libs/db"
 	"time"
 )
 
 type MasteryDAO struct {
-	Puuid                        string    `db:"puuid" json:"puuid"`
-	ChampionPointsUntilNextLevel int64     `db:"champion_points_until_next_level" json:"championPointsUntilNextLevel"`
-	ChestGranted                 bool      `db:"chest_granted" json:"chestGranted"`
-	ChampionId                   int64     `db:"champion_id" json:"championId"`
-	LastPlayTime                 time.Time `db:"last_play_time" json:"lastPlayTime"`
-	ChampionLevel                int       `db:"champion_level" json:"championLevel"`
-	ChampionPoints               int       `db:"champion_points" json:"championPoints"`
-	ChampionPointsSinceLastLevel int64     `db:"champion_points_since_last_level" json:"championPointsSinceLastLevel"`
-	TokensEarned                 int       `db:"tokens_earned" json:"tokensEarned"`
+	Puuid                        string        `db:"puuid" json:"puuid"`
+	SummonerFk                   sql.NullInt64 `db:"summoner_fk" json:"-"`
+	ChampionPointsUntilNextLevel int64         `db:"champion_points_until_next_level" json:"championPointsUntilNextLevel"`
+	ChestGranted                 bool          `db:"chest_granted" json:"chestGranted"`
+	ChampionId                   int64         `db:"champion_id" json:"championId"`
+	LastPlayTime                 time.Time     `db:"last_play_time" json:"lastPlayTime"`
+	ChampionLevel                int           `db:"champion_level" json:"championLevel"`
+	ChampionPoints               int           `db:"champion_points" json:"championPoints"`
+	ChampionPointsSinceLastLevel int64         `db:"champion_points_since_last_level" json:"championPointsSinceLastLevel"`
+	TokensEarned                 int           `db:"tokens_earned" json:"tokensEarned"`
 }
 
 func (m *MasteryDAO) Upsert(db db.Context) error {

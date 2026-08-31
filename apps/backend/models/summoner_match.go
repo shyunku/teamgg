@@ -7,8 +7,10 @@ import (
 )
 
 type SummonerMatchDAO struct {
-	Puuid   string `db:"puuid" json:"puuid"`
-	MatchId string `db:"match_id" json:"matchId"`
+	Puuid      string        `db:"puuid" json:"puuid"`
+	MatchId    string        `db:"match_id" json:"matchId"`
+	SummonerFk sql.NullInt64 `db:"summoner_fk" json:"-"`
+	MatchFk    sql.NullInt64 `db:"match_fk" json:"-"`
 }
 
 func (s *SummonerMatchDAO) Upsert(db db.Context) error {

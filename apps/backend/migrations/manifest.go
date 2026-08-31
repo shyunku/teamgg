@@ -144,6 +144,12 @@ func migrationDefinitions() []Definition {
 			Apply:    applyNumericKeyParentPreallocation,
 			Validate: validateNumericKeyParentPreallocation,
 		},
+		{
+			Version:  numericKeyChildrenMigrationVersion,
+			FileName: "20260831_add_numeric_key_children.sql",
+			Apply:    applyNumericKeyChildren,
+			Validate: validateNumericKeyChildren,
+		},
 	}
 }
 
