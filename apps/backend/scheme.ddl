@@ -170,9 +170,6 @@ create table teamgg.match_participant_perk_style_selections
             on update cascade on delete cascade
 );
 
-create index match_participant_perk_styles_description_index
-    on teamgg.match_participant_perk_styles (description);
-
 create table teamgg.match_participant_perks
 (
     match_participant_id varchar(255) not null
@@ -191,14 +188,8 @@ create index match_participants_champion_id_index
 create index match_participants_match_participant_id_index
     on teamgg.match_participants (match_participant_id);
 
-create index match_participants_participant_id_index
-    on teamgg.match_participants (participant_id);
-
 create index match_participants_summoner_puuid_fk
     on teamgg.match_participants (puuid);
-
-create index match_participants_team_position_index
-    on teamgg.match_participants (team_position);
 
 create table teamgg.match_teams
 (
@@ -369,9 +360,6 @@ create table teamgg.masteries
         foreign key (puuid) references teamgg.summoners (puuid)
             on update cascade on delete cascade
 );
-
-create index masteries_champion_id_champion_points_index
-    on teamgg.masteries (champion_id asc, champion_points desc);
 
 create table teamgg.summoner_matches
 (

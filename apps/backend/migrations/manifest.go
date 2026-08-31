@@ -126,6 +126,12 @@ func migrationDefinitions() []Definition {
 			Apply:    applyIncrementalChampionDetailStatistics,
 			Validate: validateIncrementalChampionDetailStatistics,
 		},
+		{
+			Version:  "20260830_004",
+			FileName: "20260830_remove_unused_indexes.sql",
+			Apply:    applyUnusedIndexCleanup,
+			Validate: validateUnusedIndexCleanup,
+		},
 	}
 }
 
