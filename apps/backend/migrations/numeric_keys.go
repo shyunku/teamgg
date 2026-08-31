@@ -424,17 +424,19 @@ func backfillParticipantNumericKeys(ctx context.Context, database *sqlx.DB, dead
 				participant.match_participant_id,
 				match_key.match_id AS match_numeric_id,
 				summoner_key.summoner_id AS summoner_numeric_id
-			FROM match_participants participant FORCE INDEX (PRIMARY)
+			FROM (
+				SELECT match_id, participant_id, match_participant_id, puuid
+				FROM match_participants FORCE INDEX (PRIMARY)
+				WHERE (match_participant_pk IS NULL OR match_fk IS NULL OR summoner_fk IS NULL)
+				  AND (match_id > ? OR (match_id = ? AND participant_id > ?))
+				ORDER BY match_id, participant_id
+				LIMIT ?
+			) participant
 			LEFT JOIN match_numeric_keys match_key
 				ON match_key.riot_match_id = participant.match_id
 			LEFT JOIN summoner_numeric_keys summoner_key
 				ON summoner_key.puuid = participant.puuid
-			WHERE (participant.match_participant_pk IS NULL
-				OR participant.match_fk IS NULL OR participant.summoner_fk IS NULL)
-			  AND (participant.match_id > ?
-				OR (participant.match_id = ? AND participant.participant_id > ?))
-			ORDER BY participant.match_id, participant.participant_id
-			LIMIT ?`
+			ORDER BY participant.match_id, participant.participant_id`
 		if err := database.SelectContext(ctx, &rows, query, progress.CursorText, progress.CursorText, progress.CursorNumber, batchSize); err != nil {
 			return false, processedThisRun, err
 		}
