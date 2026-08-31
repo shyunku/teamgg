@@ -265,6 +265,14 @@ func fetchSummonerMatchesFromRiot(resolve chan<- api.MatchDto, reject chan<- err
 
 func saveMatchToLocalDB(db db.Context, puuid string, match api.MatchDto) error {
 	matchId := match.Metadata.MatchId
+	participantPuuids := make([]string, 0, len(match.Info.Participants))
+	for _, participant := range match.Info.Participants {
+		participantPuuids = append(participantPuuids, participant.Puuid)
+	}
+	if err := models.ReserveMatchNumericKeys(db, matchId, participantPuuids); err != nil {
+		logMatchPersistenceError(err)
+		return err
+	}
 	matchDAO := &models.MatchDAO{
 		MatchId:            matchId,
 		DataVersion:        match.Metadata.DataVersion,
@@ -523,6 +531,20 @@ func SaveDataExplorerMatch(match api.MatchDto, sourcePuuids []string) error {
 		}
 
 		matchId := match.Metadata.MatchId
+		reservationPuuids := make([]string, 0, len(match.Info.Participants)+len(sourcePuuids))
+		for _, participant := range match.Info.Participants {
+			reservationPuuids = append(reservationPuuids, participant.Puuid)
+		}
+		reservationPuuids = append(reservationPuuids, sourcePuuids...)
+		err = models.ReserveMatchNumericKeys(tx, matchId, reservationPuuids)
+		if err != nil {
+			_ = tx.Rollback()
+			if !isRetryableDatabaseError(err) || attempt == maxAttempts-1 {
+				return err
+			}
+			time.Sleep(time.Duration(50*(1<<attempt)+rand.Intn(100)) * time.Millisecond)
+			continue
+		}
 		_, exists, err := models.GetMatchDAO(tx, matchId)
 		if err == nil && !exists {
 			// Sources are connected below. Passing an empty PUUID avoids writing the
