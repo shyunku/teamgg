@@ -93,3 +93,25 @@ metadata lock 대기가 발생할 수 있다.
 6. 회귀가 확인되면 rollback SQL로 필요한 인덱스만 재생성한다.
 
 운영 적용과 사후 검증이 끝나기 전까지 Task #63은 WIP로 유지한다.
+
+## 8. 운영 적용 결과
+
+- 적용 일시: 2026-08-31 14:59 KST
+- 운영 MySQL: 8.0.45
+- 마이그레이션: `20260830_004`, `dirty=0`, `duration_ms=1519`, 오류 없음
+- 제거 대상 인덱스 조회: 0행
+- 대체 숙련도 인덱스:
+  `masteries_champion_points_level_covering_index(champion_id, champion_points, champion_level)` 유지
+- 백엔드 재기동: 약 15초 후 healthy
+- 루트 API: 정상 응답, production `0.11.1`
+- champion API: HTTP 200
+- meta-summary API: HTTP 200
+- 재기동 후 migration, deadlock, duplicate, temporary-file 관련 오류: 없음
+
+백엔드가 health check를 통과하기 전 약 2초 시점의 첫 요청은 connection reset으로
+종료됐으나, health가 healthy로 전환된 뒤 같은 루트 요청과 통계 API가 모두
+정상 응답했다. 이는 기동 중 요청으로 확인됐으며 지속 장애나 회귀가 아니다.
+
+운영 제거 후에도 신규 숙련도 covering index가 정확한 컬럼 순서로 유지됐고,
+제거 후보 없이 수행한 사전 운영 EXPLAIN과 실제 API smoke test가 모두
+정상이다. Task #63의 구현·운영 적용·사후 검증 조건을 충족해 완료 처리한다.
