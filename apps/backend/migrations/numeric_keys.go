@@ -366,7 +366,7 @@ func backfillSimpleNumericKeys(
 			return true, processedThisRun, nil
 		}
 
-		tx, err := database.BeginTxx(ctx, nil)
+		tx, err := beginNumericKeyBackfillTransaction(ctx, database)
 		if err != nil {
 			return false, processedThisRun, err
 		}
@@ -444,7 +444,7 @@ func backfillParticipantNumericKeys(ctx context.Context, database *sqlx.DB, dead
 			return true, processedThisRun, nil
 		}
 
-		tx, err := database.BeginTxx(ctx, nil)
+		tx, err := beginNumericKeyBackfillTransaction(ctx, database)
 		if err != nil {
 			return false, processedThisRun, err
 		}
@@ -664,6 +664,18 @@ func loadNumericKeyIdentities(
 
 type numericKeyProgressStore interface {
 	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
+}
+
+func beginNumericKeyBackfillTransaction(ctx context.Context, database *sqlx.DB) (*sqlx.Tx, error) {
+	tx, err := database.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `SET SESSION binlog_row_image = 'MINIMAL'`); err != nil {
+		_ = tx.Rollback()
+		return nil, fmt.Errorf("set numeric key backfill binlog row image: %w", err)
+	}
+	return tx, nil
 }
 
 func loadNumericKeyProgress(ctx context.Context, database *sqlx.DB, entity string) (numericKeyProgress, error) {

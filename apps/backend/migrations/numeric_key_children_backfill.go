@@ -141,7 +141,7 @@ func backfillNumericKeyChild(
 		if err != nil {
 			return false, processedThisRun, err
 		}
-		tx, err := database.BeginTxx(ctx, nil)
+		tx, err := beginNumericKeyBackfillTransaction(ctx, database)
 		if err != nil {
 			return false, processedThisRun, err
 		}
