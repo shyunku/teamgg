@@ -100,6 +100,19 @@ docker compose run --rm backend migrate
 docker compose up -d --build backend replay-analyzer admin
 ```
 
+Task #64 adds the numeric-key foundation without automatically processing old
+rows. During a low-load window, run the bounded parent-key backfill explicitly:
+
+```bash
+docker compose run --rm backend backfill-numeric-keys
+```
+
+`NUMERIC_KEY_BACKFILL_BATCH_SIZE` defaults to `1000` (`10`-`10000`) and
+`NUMERIC_KEY_BACKFILL_WORK_LIMIT` defaults to `10m` (`1s`-`1h`). Re-run the
+command until it reports `ready=true`. Do not run it while the initial Champion
+Detail source backfill is active. This command does not switch constraints or
+remove legacy string identifiers.
+
 Configure the production reverse proxy with at least a `250m` request body limit for replay uploads, a read timeout longer than `ANALYSIS_TIMEOUT`, and disabled buffering for SSE responses. Use HTTPS for both public APIs and keep the container ports bound to loopback whenever possible.
 
 The production frontend continues to be deployed to Amazon S3:

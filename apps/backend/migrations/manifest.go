@@ -132,6 +132,12 @@ func migrationDefinitions() []Definition {
 			Apply:    applyUnusedIndexCleanup,
 			Validate: validateUnusedIndexCleanup,
 		},
+		{
+			Version:  numericKeyMigrationVersion,
+			FileName: "20260830_add_numeric_key_foundation.sql",
+			Apply:    applyNumericKeyFoundation,
+			Validate: validateNumericKeyFoundation,
+		},
 	}
 }
 

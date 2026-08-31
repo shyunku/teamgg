@@ -44,3 +44,13 @@ team.gg는 League of Legends 전적·통계 조회, 내전 팀 구성 및 밸런
 - 전역 통계 advisory lock 안에서 staging 테이블을 교체하므로 여러 서버 인스턴스가 동시에 덮어쓰지 않는다.
 - 메타와 카운터 통계는 staging 데이터에 대한 statement-scoped CTE로 계산하며 외부 API 응답 스키마는 유지한다.
 - 운영 규모에서 기존 약 7.8GB 임시 공간 기준과 실행 시간·잠금을 비교한 뒤 Task #62를 완료 처리한다.
+
+## 숫자 키 기반 스키마 v2
+
+- Riot PUUID·match ID·참가자 UUID는 외부 식별자로 유지하고, DB 내부 관계에는 `BIGINT UNSIGNED` 숫자 키를 사용한다.
+- `summoners.summoner_pk`, `matches.match_pk`, `match_participants.match_participant_pk`를 새 내부 키로 사용한다.
+- 기존 `summoners.id`와 `match_participants.participant_id`는 의미가 다른 레거시 필드이므로 숫자 PK로 재사용하지 않는다.
+- 전환은 additive foundation, 신규 쓰기 동기화, 제한된 keyset 백필, 동일성 검증, 하위 FK 이관, 읽기 전환, 제약조건 전환, 레거시 정리 순서로 수행한다.
+- 일반 서버 시작은 백필을 실행하지 않으며 `backfill-numeric-keys` 유지보수 명령에서만 명시적으로 실행한다.
+- 전체 백필과 운영 검증 전에는 문자열 키 또는 기존 PK/FK를 제거하지 않는다.
+- 세부 단계와 완료 조건은 `docs/plans/numeric-key-schema-v2.md`를 따른다.

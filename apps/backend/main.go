@@ -60,10 +60,11 @@ func main() {
 
 	migrationOnly := len(os.Args) > 1 && strings.EqualFold(os.Args[1], "migrate")
 	championDetailCollectionOnly := len(os.Args) > 1 && strings.EqualFold(os.Args[1], "collect-champion-detail")
+	numericKeyBackfillOnly := len(os.Args) > 1 && strings.EqualFold(os.Args[1], "backfill-numeric-keys")
 	requiredEnvironment := []string{
 		"DB_USER", "DB_PASSWORD", "DB_HOST", "DB_PORT", "DB_NAME",
 	}
-	if !migrationOnly {
+	if !migrationOnly && !numericKeyBackfillOnly {
 		requiredEnvironment = append(requiredEnvironment,
 			"APP_SERVER_PORT",
 			"JWT_ACCESS_SECRET",
@@ -103,6 +104,30 @@ func main() {
 	}
 	if migrationOnly {
 		log.Info("Database migrations completed")
+		if err := db.Root.Close(); err != nil {
+			log.Error(err)
+			os.Exit(-4)
+		}
+		return
+	}
+	if numericKeyBackfillOnly {
+		options := migrations.NumericKeyBackfillOptionsFromEnvironment()
+		log.Infof(
+			"Numeric key backfill starting: batchSize=%d workLimit=%s",
+			options.BatchSize, options.WorkLimit,
+		)
+		result, backfillErr := migrations.BackfillNumericKeys(ctx, db.Root.DB, options)
+		if backfillErr != nil {
+			log.Error(backfillErr)
+			os.Exit(-4)
+		}
+		log.Infof(
+			"Numeric key backfill finished: ready=%t summoners=%d/%t matches=%d/%t participants=%d/%t",
+			result.Ready,
+			result.SummonersProcessed, result.SummonersCompleted,
+			result.MatchesProcessed, result.MatchesCompleted,
+			result.ParticipantsProcessed, result.ParticipantsCompleted,
+		)
 		if err := db.Root.Close(); err != nil {
 			log.Error(err)
 			os.Exit(-4)
