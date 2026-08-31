@@ -103,8 +103,32 @@ func TestNumericKeyFoundationAndBackfillMySQL(t *testing.T) {
 		INSERT INTO match_participants
 			(match_id, participant_id, match_participant_id, puuid)
 		VALUES ('KR_new', 2, 'orphan-participant', 'missing-puuid')
-	`); err == nil {
-		t.Fatal("participant trigger accepted a missing summoner parent")
+	`); err != nil {
+		t.Fatalf("participant trigger blocked a summoner pending discovery: %v", err)
+	}
+	var reservedSummonerId, participantSummonerId int64
+	if err := database.QueryRowxContext(ctx, `
+		SELECT numeric_key.summoner_id, participant.summoner_fk
+		FROM match_participants participant
+		INNER JOIN summoner_numeric_keys numeric_key ON numeric_key.puuid = participant.puuid
+		WHERE participant.match_participant_id = 'orphan-participant'
+	`).Scan(&reservedSummonerId, &participantSummonerId); err != nil {
+		t.Fatal(err)
+	}
+	if reservedSummonerId == 0 || reservedSummonerId != participantSummonerId {
+		t.Fatalf("pending summoner identity was not reserved consistently: key=%d participant=%d", reservedSummonerId, participantSummonerId)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO summoners (puuid) VALUES ('missing-puuid')`); err != nil {
+		t.Fatal(err)
+	}
+	var discoveredSummonerId int64
+	if err := database.GetContext(ctx, &discoveredSummonerId, `
+		SELECT summoner_pk FROM summoners WHERE puuid = 'missing-puuid'
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if discoveredSummonerId != reservedSummonerId {
+		t.Fatalf("discovered summoner did not reuse reserved identity: reserved=%d discovered=%d", reservedSummonerId, discoveredSummonerId)
 	}
 
 	ready, err := validateNumericKeyBackfill(ctx, database)

@@ -169,25 +169,22 @@ func numericKeyTriggers() []numericKeyTrigger {
 				SET NEW.match_pk = LAST_INSERT_ID();
 			END`,
 		},
-		{
-			name: "match_participants_numeric_key_bi",
-			statement: `CREATE TRIGGER match_participants_numeric_key_bi BEFORE INSERT ON match_participants
+		numericKeyParticipantInsertTrigger(),
+	}
+}
+
+func numericKeyParticipantInsertTrigger() numericKeyTrigger {
+	return numericKeyTrigger{
+		name: "match_participants_numeric_key_bi",
+		statement: `CREATE TRIGGER match_participants_numeric_key_bi BEFORE INSERT ON match_participants
 			FOR EACH ROW
 			BEGIN
-				INSERT IGNORE INTO match_numeric_keys (riot_match_id)
-				SELECT NEW.match_id FROM matches WHERE match_id = NEW.match_id;
-				SET NEW.match_fk = (
-					SELECT match_id FROM match_numeric_keys WHERE riot_match_id = NEW.match_id
-				);
-				INSERT IGNORE INTO summoner_numeric_keys (puuid)
-				SELECT NEW.puuid FROM summoners WHERE puuid = NEW.puuid;
-				SET NEW.summoner_fk = (
-					SELECT summoner_id FROM summoner_numeric_keys WHERE puuid = NEW.puuid
-				);
-				IF NEW.match_fk IS NULL OR NEW.summoner_fk IS NULL THEN
-					SIGNAL SQLSTATE '45000'
-						SET MESSAGE_TEXT = 'match participant numeric key parent is missing';
-				END IF;
+				INSERT INTO match_numeric_keys (riot_match_id) VALUES (NEW.match_id)
+				ON DUPLICATE KEY UPDATE match_id = LAST_INSERT_ID(match_id);
+				SET NEW.match_fk = LAST_INSERT_ID();
+				INSERT INTO summoner_numeric_keys (puuid) VALUES (NEW.puuid)
+				ON DUPLICATE KEY UPDATE summoner_id = LAST_INSERT_ID(summoner_id);
+				SET NEW.summoner_fk = LAST_INSERT_ID();
 				INSERT INTO match_participant_numeric_keys
 					(legacy_match_participant_id, match_id, summoner_id, participant_id)
 				VALUES
@@ -198,7 +195,6 @@ func numericKeyTriggers() []numericKeyTrigger {
 					participant_id = VALUES(participant_id);
 				SET NEW.match_participant_pk = LAST_INSERT_ID();
 			END`,
-		},
 	}
 }
 

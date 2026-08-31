@@ -72,3 +72,21 @@ func TestNumericKeyTriggersCoverEveryParentWrite(t *testing.T) {
 		}
 	}
 }
+
+func TestParticipantTriggerPreallocatesPendingParents(t *testing.T) {
+	statement := strings.ToLower(strings.Join(strings.Fields(numericKeyParticipantInsertTrigger().statement), " "))
+	required := []string{
+		"insert into match_numeric_keys (riot_match_id) values (new.match_id)",
+		"insert into summoner_numeric_keys (puuid) values (new.puuid)",
+		"set new.match_fk = last_insert_id()",
+		"set new.summoner_fk = last_insert_id()",
+	}
+	for _, fragment := range required {
+		if !strings.Contains(statement, fragment) {
+			t.Fatalf("participant trigger is missing %q", fragment)
+		}
+	}
+	if strings.Contains(statement, "signal sqlstate") {
+		t.Fatal("participant trigger must not reject the existing participant-before-summoner write order")
+	}
+}

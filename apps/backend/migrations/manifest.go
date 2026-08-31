@@ -138,6 +138,12 @@ func migrationDefinitions() []Definition {
 			Apply:    applyNumericKeyFoundation,
 			Validate: validateNumericKeyFoundation,
 		},
+		{
+			Version:  numericKeyParentPreallocationMigrationVersion,
+			FileName: "20260831_allow_numeric_key_parent_preallocation.sql",
+			Apply:    applyNumericKeyParentPreallocation,
+			Validate: validateNumericKeyParentPreallocation,
+		},
 	}
 }
 
