@@ -47,10 +47,11 @@ type numericKeyProgress struct {
 }
 
 type participantNumericKeyRow struct {
-	MatchId            string `db:"match_id"`
-	ParticipantId      int    `db:"participant_id"`
-	MatchParticipantId string `db:"match_participant_id"`
-	Puuid              string `db:"puuid"`
+	MatchId           string        `db:"match_id"`
+	ParticipantId     int           `db:"participant_id"`
+	LegacyParticipant string        `db:"match_participant_id"`
+	MatchNumericId    sql.NullInt64 `db:"match_numeric_id"`
+	SummonerNumericId sql.NullInt64 `db:"summoner_numeric_id"`
 }
 
 func applyNumericKeyFoundation(ctx context.Context, database *sqlx.DB) error {
@@ -419,11 +420,20 @@ func backfillParticipantNumericKeys(ctx context.Context, database *sqlx.DB, dead
 	for time.Now().Before(deadline) {
 		rows := make([]participantNumericKeyRow, 0, batchSize)
 		query := `
-			SELECT match_id, participant_id, match_participant_id, puuid
-			FROM match_participants FORCE INDEX (PRIMARY)
-			WHERE (match_participant_pk IS NULL OR match_fk IS NULL OR summoner_fk IS NULL)
-			  AND (match_id > ? OR (match_id = ? AND participant_id > ?))
-			ORDER BY match_id, participant_id
+			SELECT participant.match_id, participant.participant_id,
+				participant.match_participant_id,
+				match_key.match_id AS match_numeric_id,
+				summoner_key.summoner_id AS summoner_numeric_id
+			FROM match_participants participant FORCE INDEX (PRIMARY)
+			LEFT JOIN match_numeric_keys match_key
+				ON match_key.riot_match_id = participant.match_id
+			LEFT JOIN summoner_numeric_keys summoner_key
+				ON summoner_key.puuid = participant.puuid
+			WHERE (participant.match_participant_pk IS NULL
+				OR participant.match_fk IS NULL OR participant.summoner_fk IS NULL)
+			  AND (participant.match_id > ?
+				OR (participant.match_id = ? AND participant.participant_id > ?))
+			ORDER BY participant.match_id, participant.participant_id
 			LIMIT ?`
 		if err := database.SelectContext(ctx, &rows, query, progress.CursorText, progress.CursorText, progress.CursorNumber, batchSize); err != nil {
 			return false, processedThisRun, err
@@ -441,83 +451,11 @@ func backfillParticipantNumericKeys(ctx context.Context, database *sqlx.DB, dead
 			return true, processedThisRun, nil
 		}
 
-		participantKeys := make([]string, 0, len(rows))
-		for _, row := range rows {
-			participantKeys = append(participantKeys, row.MatchParticipantId)
-		}
 		tx, err := database.BeginTxx(ctx, nil)
 		if err != nil {
 			return false, processedThisRun, err
 		}
-		insertQuery, insertArgs, err := sqlx.In(`
-			INSERT INTO match_participant_numeric_keys (legacy_match_participant_id)
-			SELECT match_participant_id FROM match_participants WHERE match_participant_id IN (?)
-			ON DUPLICATE KEY UPDATE
-				legacy_match_participant_id = VALUES(legacy_match_participant_id)
-		`, participantKeys)
-		if err == nil {
-			_, err = tx.ExecContext(ctx, tx.Rebind(insertQuery), insertArgs...)
-		}
-		if err == nil {
-			updateMapQuery, updateMapArgs, bindErr := sqlx.In(`
-				UPDATE match_participant_numeric_keys participant_key
-				INNER JOIN match_participants participant
-					ON participant.match_participant_id = participant_key.legacy_match_participant_id
-				INNER JOIN match_numeric_keys match_key ON match_key.riot_match_id = participant.match_id
-				INNER JOIN summoner_numeric_keys summoner_key ON summoner_key.puuid = participant.puuid
-				SET participant_key.match_id = match_key.match_id,
-					participant_key.summoner_id = summoner_key.summoner_id,
-					participant_key.participant_id = participant.participant_id
-				WHERE participant_key.legacy_match_participant_id IN (?)
-			`, participantKeys)
-			if bindErr != nil {
-				err = bindErr
-			} else {
-				_, err = tx.ExecContext(ctx, tx.Rebind(updateMapQuery), updateMapArgs...)
-			}
-		}
-		if err == nil {
-			updateSourceQuery, updateSourceArgs, bindErr := sqlx.In(`
-				UPDATE match_participants participant
-				INNER JOIN match_participant_numeric_keys participant_key
-					ON participant_key.legacy_match_participant_id = participant.match_participant_id
-				SET participant.match_participant_pk = participant_key.match_participant_id,
-					participant.match_fk = participant_key.match_id,
-					participant.summoner_fk = participant_key.summoner_id
-				WHERE participant.match_participant_id IN (?)
-				  AND participant_key.match_id IS NOT NULL
-				  AND participant_key.summoner_id IS NOT NULL
-			`, participantKeys)
-			if bindErr != nil {
-				err = bindErr
-			} else {
-				_, err = tx.ExecContext(ctx, tx.Rebind(updateSourceQuery), updateSourceArgs...)
-			}
-		}
-		if err == nil {
-			validationQuery, validationArgs, bindErr := sqlx.In(`
-				SELECT COUNT(*)
-				FROM match_participants participant
-				LEFT JOIN match_participant_numeric_keys participant_key
-					ON participant_key.legacy_match_participant_id = participant.match_participant_id
-				WHERE participant.match_participant_id IN (?)
-				  AND (participant.match_participant_pk IS NULL
-				    OR participant.match_fk IS NULL OR participant.summoner_fk IS NULL
-				    OR participant_key.match_id IS NULL OR participant_key.summoner_id IS NULL)
-			`, participantKeys)
-			if bindErr != nil {
-				err = bindErr
-			} else {
-				var unresolved int
-				err = tx.GetContext(ctx, &unresolved, tx.Rebind(validationQuery), validationArgs...)
-				if err == nil && unresolved != 0 {
-					err = fmt.Errorf(
-						"%d participant rows have no matching summoner or match numeric key",
-						unresolved,
-					)
-				}
-			}
-		}
+		err = upsertParticipantNumericKeyBatch(ctx, tx, rows)
 		if err != nil {
 			_ = tx.Rollback()
 			return false, processedThisRun, fmt.Errorf("backfill participant numeric keys: %w", err)
@@ -536,6 +474,93 @@ func backfillParticipantNumericKeys(ctx context.Context, database *sqlx.DB, dead
 		processedThisRun += int64(len(rows))
 	}
 	return false, processedThisRun, nil
+}
+
+func upsertParticipantNumericKeyBatch(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	rows []participantNumericKeyRow,
+) error {
+	placeholders := make([]string, 0, len(rows))
+	insertArgs := make([]interface{}, 0, len(rows)*4)
+	legacyKeys := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if !row.MatchNumericId.Valid || !row.SummonerNumericId.Valid {
+			return fmt.Errorf(
+				"participant %s/%d has no matching numeric parent key",
+				row.MatchId, row.ParticipantId,
+			)
+		}
+		placeholders = append(placeholders, "(?, ?, ?, ?)")
+		insertArgs = append(insertArgs,
+			row.LegacyParticipant, row.MatchNumericId.Int64, row.SummonerNumericId.Int64, row.ParticipantId,
+		)
+		legacyKeys = append(legacyKeys, row.LegacyParticipant)
+	}
+	insertQuery := `
+		INSERT INTO match_participant_numeric_keys
+			(legacy_match_participant_id, match_id, summoner_id, participant_id)
+		VALUES ` + strings.Join(placeholders, ",") + `
+		ON DUPLICATE KEY UPDATE
+			match_id = VALUES(match_id), summoner_id = VALUES(summoner_id),
+			participant_id = VALUES(participant_id)`
+	if _, err := tx.ExecContext(ctx, tx.Rebind(insertQuery), insertArgs...); err != nil {
+		return err
+	}
+
+	type participantKey struct {
+		Id     int64  `db:"match_participant_id"`
+		Legacy string `db:"legacy_match_participant_id"`
+	}
+	keyQuery, keyArgs, err := sqlx.In(`
+		SELECT match_participant_id, legacy_match_participant_id
+		FROM match_participant_numeric_keys
+		WHERE legacy_match_participant_id IN (?)
+	`, legacyKeys)
+	if err != nil {
+		return err
+	}
+	keys := make([]participantKey, 0, len(rows))
+	if err := tx.SelectContext(ctx, &keys, tx.Rebind(keyQuery), keyArgs...); err != nil {
+		return err
+	}
+	ids := make(map[string]int64, len(keys))
+	for _, key := range keys {
+		ids[key.Legacy] = key.Id
+	}
+	if len(ids) != len(rows) {
+		return fmt.Errorf("resolved %d of %d participant numeric keys", len(ids), len(rows))
+	}
+
+	statement, err := tx.PrepareContext(ctx, `
+		UPDATE match_participants
+		SET match_participant_pk = ?, match_fk = ?, summoner_fk = ?
+		WHERE match_id = ? AND participant_id = ?
+	`)
+	if err != nil {
+		return err
+	}
+	defer statement.Close()
+	for _, row := range rows {
+		result, err := statement.ExecContext(ctx,
+			ids[row.LegacyParticipant], row.MatchNumericId.Int64, row.SummonerNumericId.Int64,
+			row.MatchId, row.ParticipantId,
+		)
+		if err != nil {
+			return err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected != 1 {
+			return fmt.Errorf(
+				"updated %d rows for participant %s/%d; expected 1",
+				affected, row.MatchId, row.ParticipantId,
+			)
+		}
+	}
+	return nil
 }
 
 type numericKeyProgressStore interface {

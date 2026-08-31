@@ -68,8 +68,7 @@ func TestNumericKeyFoundationAndBackfillMySQL(t *testing.T) {
 			participant_id INT NOT NULL,
 			match_participant_id VARCHAR(255) NOT NULL,
 			puuid VARCHAR(255) NOT NULL,
-			PRIMARY KEY (match_id, participant_id),
-			UNIQUE KEY match_participants_legacy_uindex (match_participant_id)
+			PRIMARY KEY (match_id, participant_id)
 		) ENGINE=InnoDB`,
 		`CREATE TABLE masteries (puuid VARCHAR(255) NOT NULL, champion_id INT NOT NULL, PRIMARY KEY (puuid, champion_id)) ENGINE=InnoDB`,
 		`CREATE TABLE leagues (puuid VARCHAR(255) NOT NULL, league_id VARCHAR(64) NOT NULL, queue_type VARCHAR(64) NOT NULL, PRIMARY KEY (puuid, league_id, queue_type)) ENGINE=InnoDB`,
