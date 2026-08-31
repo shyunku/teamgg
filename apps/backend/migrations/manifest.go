@@ -150,6 +150,12 @@ func migrationDefinitions() []Definition {
 			Apply:    applyNumericKeyChildren,
 			Validate: validateNumericKeyChildren,
 		},
+		{
+			Version:  dataExplorerClaimIndexesMigrationVersion,
+			FileName: "20260831_add_data_explorer_claim_indexes.sql",
+			Apply:    applyDataExplorerClaimIndexes,
+			Validate: validateDataExplorerClaimIndexes,
+		},
 	}
 }
 

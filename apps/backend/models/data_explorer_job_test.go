@@ -13,6 +13,22 @@ type dataExplorerTestResult int64
 func (result dataExplorerTestResult) LastInsertId() (int64, error) { return 0, nil }
 func (result dataExplorerTestResult) RowsAffected() (int64, error) { return int64(result), nil }
 
+func TestDataExplorerClaimQueriesForceOrderedIndexes(t *testing.T) {
+	tests := map[string]string{
+		"summoner": dataExplorerSummonerClaimQuery,
+		"match":    dataExplorerMatchClaimQuery,
+	}
+	for name, query := range tests {
+		normalized := strings.ToLower(strings.Join(strings.Fields(query), " "))
+		if !strings.Contains(normalized, "force index") || !strings.Contains(normalized, "priority desc") {
+			t.Fatalf("%s claim query does not force the ordered index: %s", name, normalized)
+		}
+		if !strings.Contains(normalized, "limit 1 for update skip locked") {
+			t.Fatalf("%s claim query lost bounded locking: %s", name, normalized)
+		}
+	}
+}
+
 type dataExplorerTestContext struct {
 	cursorId      string
 	cursorDone    bool

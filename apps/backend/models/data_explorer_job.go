@@ -346,30 +346,34 @@ func claimDataExplorerJob(query string, destination interface{}, lease time.Dura
 	return true, nil
 }
 
+const dataExplorerSummonerClaimQuery = `
+	SELECT puuid, status, priority, depth, attempts, next_attempt_at, lease_until,
+	       discovered_from_match_id, last_error
+	FROM data_explorer_summoner_jobs FORCE INDEX (data_explorer_summoner_jobs_claim_v2_index)
+	WHERE status = 'pending' AND next_attempt_at <= NOW(6)
+	ORDER BY next_attempt_at ASC, priority DESC, created_at ASC
+	LIMIT 1
+	FOR UPDATE SKIP LOCKED
+`
+
+const dataExplorerMatchClaimQuery = `
+	SELECT match_id, status, priority, depth, attempts, next_attempt_at, lease_until, last_error
+	FROM data_explorer_match_jobs FORCE INDEX (data_explorer_match_jobs_claim_v2_index)
+	WHERE status = 'pending' AND next_attempt_at <= NOW(6)
+	ORDER BY next_attempt_at ASC, priority DESC, created_at ASC
+	LIMIT 1
+	FOR UPDATE SKIP LOCKED
+`
+
 func ClaimDataExplorerSummonerJob(lease time.Duration) (*DataExplorerSummonerJobDAO, bool, error) {
 	job := &DataExplorerSummonerJobDAO{}
-	found, err := claimDataExplorerJob(`
-		SELECT puuid, status, priority, depth, attempts, next_attempt_at, lease_until,
-		       discovered_from_match_id, last_error
-		FROM data_explorer_summoner_jobs
-		WHERE status = 'pending' AND next_attempt_at <= NOW(6)
-		ORDER BY next_attempt_at ASC, priority DESC, created_at ASC
-		LIMIT 1
-		FOR UPDATE SKIP LOCKED
-	`, job, lease)
+	found, err := claimDataExplorerJob(dataExplorerSummonerClaimQuery, job, lease)
 	return job, found, err
 }
 
 func ClaimDataExplorerMatchJob(lease time.Duration) (*DataExplorerMatchJobDAO, bool, error) {
 	job := &DataExplorerMatchJobDAO{}
-	found, err := claimDataExplorerJob(`
-		SELECT match_id, status, priority, depth, attempts, next_attempt_at, lease_until, last_error
-		FROM data_explorer_match_jobs
-		WHERE status = 'pending' AND next_attempt_at <= NOW(6)
-		ORDER BY next_attempt_at ASC, priority DESC, created_at ASC
-		LIMIT 1
-		FOR UPDATE SKIP LOCKED
-	`, job, lease)
+	found, err := claimDataExplorerJob(dataExplorerMatchClaimQuery, job, lease)
 	return job, found, err
 }
 

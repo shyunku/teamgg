@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,6 +79,22 @@ func TestNumericKeyFoundationAndBackfillMySQL(t *testing.T) {
 		`CREATE TABLE match_participant_perk_styles (match_participant_id VARCHAR(255) NOT NULL, style_id VARCHAR(64) NOT NULL) ENGINE=InnoDB`,
 		`CREATE TABLE match_teams (match_id VARCHAR(255) NOT NULL, team_id INT NOT NULL, PRIMARY KEY (match_id, team_id)) ENGINE=InnoDB`,
 		`CREATE TABLE match_team_bans (match_id VARCHAR(255) NOT NULL, team_id INT NOT NULL, champion_id INT NOT NULL, pick_turn INT NOT NULL) ENGINE=InnoDB`,
+		`CREATE TABLE data_explorer_summoner_jobs (
+			puuid VARCHAR(255) NOT NULL, status VARCHAR(16) NOT NULL, priority INT NOT NULL,
+			depth INT NOT NULL, attempts INT NOT NULL, next_attempt_at DATETIME(6) NOT NULL,
+			lease_until DATETIME(6) NULL, discovered_from_match_id VARCHAR(255) NULL,
+			last_error TEXT NULL, created_at DATETIME(6) NOT NULL, updated_at DATETIME(6) NOT NULL,
+			PRIMARY KEY (puuid), KEY data_explorer_summoner_jobs_claim_index (status, next_attempt_at, priority, created_at),
+			KEY data_explorer_summoner_jobs_lease_index (status, lease_until)
+		) ENGINE=InnoDB`,
+		`CREATE TABLE data_explorer_match_jobs (
+			match_id VARCHAR(255) NOT NULL, status VARCHAR(16) NOT NULL, priority INT NOT NULL,
+			depth INT NOT NULL, attempts INT NOT NULL, next_attempt_at DATETIME(6) NOT NULL,
+			lease_until DATETIME(6) NULL, last_error TEXT NULL, created_at DATETIME(6) NOT NULL,
+			updated_at DATETIME(6) NOT NULL, PRIMARY KEY (match_id),
+			KEY data_explorer_match_jobs_claim_index (status, next_attempt_at, priority, created_at),
+			KEY data_explorer_match_jobs_lease_index (status, lease_until)
+		) ENGINE=InnoDB`,
 		`INSERT INTO summoners (puuid) VALUES ('legacy-puuid')`,
 		`INSERT INTO matches (match_id) VALUES ('KR_legacy')`,
 		`INSERT INTO match_participants
@@ -103,6 +120,41 @@ func TestNumericKeyFoundationAndBackfillMySQL(t *testing.T) {
 	}
 	if err := applyNumericKeyChildren(ctx, database); err != nil {
 		t.Fatal(err)
+	}
+	if err := applyDataExplorerClaimIndexes(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+	claimIndexesReady, err := validateDataExplorerClaimIndexes(ctx, database)
+	if err != nil || !claimIndexesReady {
+		t.Fatalf("claim indexes are not ready: ready=%t err=%v", claimIndexesReady, err)
+	}
+	for _, query := range []struct {
+		name      string
+		statement string
+		indexName string
+	}{
+		{"summoner", `SELECT puuid FROM data_explorer_summoner_jobs FORCE INDEX (data_explorer_summoner_jobs_claim_v2_index) WHERE status = 'pending' AND next_attempt_at <= NOW(6) ORDER BY next_attempt_at ASC, priority DESC, created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED`, "data_explorer_summoner_jobs_claim_v2_index"},
+		{"match", `SELECT match_id FROM data_explorer_match_jobs FORCE INDEX (data_explorer_match_jobs_claim_v2_index) WHERE status = 'pending' AND next_attempt_at <= NOW(6) ORDER BY next_attempt_at ASC, priority DESC, created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED`, "data_explorer_match_jobs_claim_v2_index"},
+	} {
+		rows, err := database.QueryxContext(ctx, "EXPLAIN "+query.statement)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !rows.Next() {
+			_ = rows.Close()
+			t.Fatalf("%s claim EXPLAIN returned no rows", query.name)
+		}
+		plan := map[string]interface{}{}
+		if err := rows.MapScan(plan); err != nil {
+			_ = rows.Close()
+			t.Fatal(err)
+		}
+		_ = rows.Close()
+		key := mysqlExplainString(plan["key"])
+		extra := mysqlExplainString(plan["Extra"])
+		if key != query.indexName || strings.Contains(strings.ToLower(extra), "filesort") {
+			t.Fatalf("%s claim plan is not ordered by %s: key=%q extra=%q", query.name, query.indexName, key, extra)
+		}
 	}
 	result, err := BackfillNumericKeys(ctx, database, NumericKeyBackfillOptions{
 		BatchSize: 10,
@@ -197,6 +249,19 @@ func TestNumericKeyFoundationAndBackfillMySQL(t *testing.T) {
 	}
 	if !second.Ready || second.SummonersProcessed != 0 || second.MatchesProcessed != 0 || second.ParticipantsProcessed != 0 || second.ChildrenProcessed != 0 {
 		t.Fatalf("backfill was not idempotent: %+v", second)
+	}
+}
+
+func mysqlExplainString(value interface{}) string {
+	switch typed := value.(type) {
+	case []byte:
+		return string(typed)
+	case string:
+		return typed
+	case nil:
+		return ""
+	default:
+		return fmt.Sprint(typed)
 	}
 }
 
