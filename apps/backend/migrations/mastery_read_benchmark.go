@@ -89,7 +89,7 @@ type masteryBenchmarkAggregate struct {
 	Maximum       int64 `db:"maximum"`
 	Total         int64 `db:"total"`
 	MasteredCount int64 `db:"mastered_count"`
-	Rows          int64 `db:"rows"`
+	Rows          int64 `db:"row_count"`
 }
 
 type masteryBenchmarkRanker struct {
@@ -118,7 +118,7 @@ const legacyMasteryAggregateQuery = `
 	SELECT COALESCE(MAX(champion_points), 0) AS maximum,
 		COALESCE(SUM(champion_points), 0) AS total,
 		COALESCE(SUM(IF(champion_level >= 7, 1, 0)), 0) AS mastered_count,
-		COUNT(*) AS rows
+		COUNT(*) AS row_count
 	FROM masteries FORCE INDEX (masteries_champion_points_level_covering_index)
 	WHERE champion_id = ?`
 
@@ -126,7 +126,7 @@ const numericMasteryAggregateQuery = `
 	SELECT COALESCE(MAX(champion_points), 0) AS maximum,
 		COALESCE(SUM(champion_points), 0) AS total,
 		COALESCE(SUM(IF(champion_level >= 7, 1, 0)), 0) AS mastered_count,
-		COUNT(*) AS rows
+		COUNT(*) AS row_count
 	FROM masteries_numeric_v2
 		FORCE INDEX (masteries_numeric_champion_points_level_covering_index)
 	WHERE champion_id = ?`
