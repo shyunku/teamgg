@@ -65,10 +65,11 @@ func main() {
 	numericKeyBackfillOnly := len(os.Args) > 1 && strings.EqualFold(os.Args[1], "backfill-numeric-keys")
 	masteryNumericShadowOnly := len(os.Args) > 1 && strings.EqualFold(os.Args[1], "prepare-mastery-numeric-shadow")
 	masteryNumericShadowResetOnly := len(os.Args) > 1 && strings.EqualFold(os.Args[1], "reset-mastery-numeric-shadow")
+	masteryReadBenchmarkOnly := len(os.Args) > 1 && strings.EqualFold(os.Args[1], "benchmark-mastery-reads")
 	requiredEnvironment := []string{
 		"DB_USER", "DB_PASSWORD", "DB_HOST", "DB_PORT", "DB_NAME",
 	}
-	if !migrationOnly && !numericKeyBackfillOnly && !masteryNumericShadowOnly && !masteryNumericShadowResetOnly {
+	if !migrationOnly && !numericKeyBackfillOnly && !masteryNumericShadowOnly && !masteryNumericShadowResetOnly && !masteryReadBenchmarkOnly {
 		requiredEnvironment = append(requiredEnvironment,
 			"APP_SERVER_PORT",
 			"JWT_ACCESS_SECRET",
@@ -185,6 +186,24 @@ func main() {
 			os.Exit(-4)
 		}
 		log.Info("Mastery numeric shadow reset completed")
+		if err := db.Root.Close(); err != nil {
+			log.Error(err)
+			os.Exit(-4)
+		}
+		return
+	}
+	if masteryReadBenchmarkOnly {
+		options := migrations.MasteryReadBenchmarkOptionsFromEnvironment()
+		log.Infof(
+			"Mastery read benchmark starting: summoners=%d champions=%d iterations=%d",
+			options.SummonerSamples, options.ChampionSamples, options.Iterations,
+		)
+		result, benchmarkErr := migrations.BenchmarkMasteryReads(ctx, db.Root.DB, options)
+		if benchmarkErr != nil {
+			log.Error(benchmarkErr)
+			os.Exit(-4)
+		}
+		log.Infof("Mastery read benchmark finished: %s", result.String())
 		if err := db.Root.Close(); err != nil {
 			log.Error(err)
 			os.Exit(-4)
