@@ -67,7 +67,7 @@ func TestNumericKeyChildBackfillSpecsAreBoundedAndOrdered(t *testing.T) {
 	expected := []string{
 		"leagues", "summoner_matches", "match_teams", "match_team_bans",
 		"match_participant_details", "match_participant_perks",
-		"match_participant_perk_styles", "masteries",
+		"match_participant_perk_styles",
 	}
 	specs := numericKeyChildBackfillSpecs()
 	if len(specs) != len(expected) {
@@ -78,7 +78,9 @@ func TestNumericKeyChildBackfillSpecsAreBoundedAndOrdered(t *testing.T) {
 			t.Fatalf("spec %d: got %s, want %s", index, specs[index].entity, entity)
 		}
 	}
-	if specs[len(specs)-1].batchLimit != 100 {
-		t.Fatal("masteries must cap each batch to a small number of summoners")
+	for _, spec := range specs {
+		if spec.table == "masteries" {
+			t.Fatal("masteries must use the compact shadow copy, not in-place UPDATE backfill")
+		}
 	}
 }

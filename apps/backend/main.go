@@ -16,6 +16,7 @@ import (
 	"team.gg-server/libs/crypto"
 	"team.gg-server/libs/db"
 	"team.gg-server/migrations"
+	"team.gg-server/models"
 	"team.gg-server/service"
 	"team.gg-server/service/statistics"
 	"team.gg-server/third_party/riot"
@@ -61,10 +62,11 @@ func main() {
 	migrationOnly := len(os.Args) > 1 && strings.EqualFold(os.Args[1], "migrate")
 	championDetailCollectionOnly := len(os.Args) > 1 && strings.EqualFold(os.Args[1], "collect-champion-detail")
 	numericKeyBackfillOnly := len(os.Args) > 1 && strings.EqualFold(os.Args[1], "backfill-numeric-keys")
+	masteryNumericShadowOnly := len(os.Args) > 1 && strings.EqualFold(os.Args[1], "prepare-mastery-numeric-shadow")
 	requiredEnvironment := []string{
 		"DB_USER", "DB_PASSWORD", "DB_HOST", "DB_PORT", "DB_NAME",
 	}
-	if !migrationOnly && !numericKeyBackfillOnly {
+	if !migrationOnly && !numericKeyBackfillOnly && !masteryNumericShadowOnly {
 		requiredEnvironment = append(requiredEnvironment,
 			"APP_SERVER_PORT",
 			"JWT_ACCESS_SECRET",
@@ -122,18 +124,53 @@ func main() {
 			os.Exit(-4)
 		}
 		log.Infof(
-			"Numeric key backfill finished: ready=%t summoners=%d/%t matches=%d/%t participants=%d/%t children=%d/%t",
+			"Numeric key backfill finished: ready=%t summoners=%d/%t matches=%d/%t participants=%d/%t children=%d/%t masteriesReady=%t",
 			result.Ready,
 			result.SummonersProcessed, result.SummonersCompleted,
 			result.MatchesProcessed, result.MatchesCompleted,
 			result.ParticipantsProcessed, result.ParticipantsCompleted,
 			result.ChildrenProcessed, result.ChildrenCompleted,
+			result.MasteriesReady,
 		)
 		if err := db.Root.Close(); err != nil {
 			log.Error(err)
 			os.Exit(-4)
 		}
 		return
+	}
+	if masteryNumericShadowOnly {
+		options := migrations.MasteryNumericShadowOptionsFromEnvironment()
+		log.Infof(
+			"Mastery numeric shadow starting: batchSize=%d workLimit=%s maxBatches=%d offlineAcknowledged=%t disableBinlog=%t",
+			options.BatchSize, options.WorkLimit, options.MaxBatches, options.OfflineAcknowledged, options.DisableBinlog,
+		)
+		result, shadowErr := migrations.PrepareMasteryNumericShadow(ctx, db.Root.DB, options)
+		if shadowErr != nil {
+			log.Error(shadowErr)
+			os.Exit(-4)
+		}
+		log.Infof(
+			"Mastery numeric shadow finished: processed=%d total=%d copied=%t validated=%t",
+			result.ProcessedThisRun, result.ProcessedTotal, result.CopyCompleted, result.Validated,
+		)
+		if err := db.Root.Close(); err != nil {
+			log.Error(err)
+			os.Exit(-4)
+		}
+		return
+	}
+	if err := models.ConfigureMasteryReadSource(os.Getenv("MASTERY_READ_SOURCE")); err != nil {
+		log.Error(err)
+		os.Exit(-4)
+	}
+	if models.MasteryNumericV2ReadsEnabled() {
+		if err := migrations.ValidateMasteryNumericShadowCutover(ctx, db.Root.DB); err != nil {
+			log.Error(fmt.Errorf("mastery numeric read cutover is not ready: %w", err))
+			os.Exit(-4)
+		}
+		log.Info("Mastery read source: numeric_v2")
+	} else {
+		log.Info("Mastery read source: legacy")
 	}
 	if err := service.RootDatabaseInitializer(db.Root.DB); err != nil {
 		log.Error(fmt.Errorf("failed to initialize database: %w", err))

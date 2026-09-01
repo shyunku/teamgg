@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"reflect"
 	"strings"
+	"team.gg-server/models"
 	"testing"
 	"time"
 )
@@ -137,5 +138,37 @@ func TestGetMasteryStatisticsTopRankersUsesBoundedCoveringIndexLookup(t *testing
 	if !strings.Contains(database.selectQueries[1], "FORCE INDEX (masteries_champion_points_level_covering_index)") ||
 		!strings.Contains(database.selectQueries[1], "WHERE m.champion_id = ?") {
 		t.Fatalf("ranker query is not bounded by champion: %s", database.selectQueries[1])
+	}
+}
+
+func TestMasteryStatisticsUsesNumericShadowWhenEnabled(t *testing.T) {
+	if err := models.ConfigureMasteryReadSource(models.MasteryReadSourceNumericV2); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = models.ConfigureMasteryReadSource(models.MasteryReadSourceLegacy) })
+
+	database := &masteryStatisticsTestContext{
+		cutoff: time.Now(),
+		dirty:  []int{1},
+		aggregates: map[int]MasteryStatisticsMXDAO{
+			1: {ChampionId: 1, Count: 1},
+		},
+		rankers: []*MasteryStatisticsTopRankersMXDAO{{ChampionId: 1}},
+	}
+	if _, err := RefreshDirtyMasteryStatisticsAggregates(database, 1); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(database.getQueries[1], "FROM masteries_numeric_v2") ||
+		!strings.Contains(database.getQueries[1], "masteries_numeric_champion_points_level_covering_index") {
+		t.Fatalf("numeric aggregate query is unexpected: %s", database.getQueries[1])
+	}
+
+	database.selectQueries = nil
+	if _, err := GetMasteryStatisticsTopRankersMXDAOs(database, 1); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(database.selectQueries[1], "FROM masteries_numeric_v2") ||
+		!strings.Contains(database.selectQueries[1], "m.summoner_fk = s.summoner_pk") {
+		t.Fatalf("numeric ranker query is unexpected: %s", database.selectQueries[1])
 	}
 }

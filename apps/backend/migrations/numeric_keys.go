@@ -38,6 +38,7 @@ type NumericKeyBackfillResult struct {
 	ParticipantsCompleted bool
 	ChildrenProcessed     int64
 	ChildrenCompleted     bool
+	MasteriesReady        bool
 }
 
 type numericKeyProgress struct {
@@ -328,8 +329,16 @@ func BackfillNumericKeys(ctx context.Context, database *sqlx.DB, options Numeric
 	if err != nil || !result.ChildrenCompleted {
 		return result, err
 	}
-	result.Ready, err = validateNumericKeyChildrenBackfill(ctx, database)
-	return result, err
+	childrenReady, err := validateNumericKeyChildrenBackfill(ctx, database)
+	if err != nil {
+		return result, err
+	}
+	result.MasteriesReady, err = masteryNumericShadowReady(ctx, database)
+	if err != nil {
+		return result, err
+	}
+	result.Ready = childrenReady && result.MasteriesReady
+	return result, nil
 }
 
 func backfillSimpleNumericKeys(

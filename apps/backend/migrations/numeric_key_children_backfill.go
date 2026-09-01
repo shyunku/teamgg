@@ -23,7 +23,6 @@ type numericKeyChildBackfillSpec struct {
 	numericColumn string
 	table         string
 	updateJoin    string
-	batchLimit    int
 }
 
 func numericKeyChildBackfillSpecs() []numericKeyChildBackfillSpec {
@@ -65,11 +64,6 @@ func numericKeyChildBackfillSpecs() []numericKeyChildBackfillSpec {
 			updateJoin: `INNER JOIN match_participant_numeric_keys numeric_key ON numeric_key.legacy_match_participant_id = source.match_participant_id
 				SET source.match_participant_fk = numeric_key.match_participant_id`,
 		},
-		{
-			entity: "masteries", legacyColumn: "puuid", numericColumn: "summoner_fk", table: "masteries", batchLimit: 100,
-			updateJoin: `INNER JOIN summoner_numeric_keys numeric_key ON numeric_key.puuid = source.puuid
-				SET source.summoner_fk = numeric_key.summoner_id`,
-		},
 	}
 }
 
@@ -109,10 +103,6 @@ func backfillNumericKeyChild(
 	if err != nil || progress.Completed {
 		return progress.Completed, 0, err
 	}
-	if spec.batchLimit > 0 && batchSize > spec.batchLimit {
-		batchSize = spec.batchLimit
-	}
-
 	processedThisRun := int64(0)
 	for time.Now().Before(deadline) {
 		keys, err := selectNumericKeyChildBatch(ctx, database, spec, progress.CursorText, batchSize)
@@ -225,7 +215,6 @@ func saveNumericKeyChildProgress(
 
 func validateNumericKeyChildrenBackfill(ctx context.Context, database *sqlx.DB) (bool, error) {
 	checks := []string{
-		`SELECT EXISTS(SELECT 1 FROM masteries source LEFT JOIN summoner_numeric_keys numeric_key ON numeric_key.puuid = source.puuid WHERE source.summoner_fk IS NULL OR numeric_key.summoner_id IS NULL OR source.summoner_fk <> numeric_key.summoner_id LIMIT 1)`,
 		`SELECT EXISTS(SELECT 1 FROM leagues source LEFT JOIN summoner_numeric_keys numeric_key ON numeric_key.puuid = source.puuid WHERE source.summoner_fk IS NULL OR numeric_key.summoner_id IS NULL OR source.summoner_fk <> numeric_key.summoner_id LIMIT 1)`,
 		`SELECT EXISTS(SELECT 1 FROM summoner_matches source LEFT JOIN summoner_numeric_keys summoner_key ON summoner_key.puuid = source.puuid LEFT JOIN match_numeric_keys match_key ON match_key.riot_match_id = source.match_id WHERE source.summoner_fk IS NULL OR source.match_fk IS NULL OR summoner_key.summoner_id IS NULL OR match_key.match_id IS NULL OR source.summoner_fk <> summoner_key.summoner_id OR source.match_fk <> match_key.match_id LIMIT 1)`,
 		`SELECT EXISTS(SELECT 1 FROM match_participant_details source LEFT JOIN match_participant_numeric_keys participant_key ON participant_key.legacy_match_participant_id = source.match_participant_id LEFT JOIN match_numeric_keys match_key ON match_key.riot_match_id = source.match_id WHERE source.match_participant_fk IS NULL OR source.match_fk IS NULL OR participant_key.match_participant_id IS NULL OR match_key.match_id IS NULL OR source.match_participant_fk <> participant_key.match_participant_id OR source.match_fk <> match_key.match_id LIMIT 1)`,

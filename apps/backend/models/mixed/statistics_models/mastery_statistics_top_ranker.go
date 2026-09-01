@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"team.gg-server/libs/db"
+	"team.gg-server/models"
 )
 
 type MasteryStatisticsTopRankersMXDAO struct {
@@ -40,7 +41,7 @@ func GetMasteryStatisticsTopRankersMXDAOs(db db.Context, topRanks int) ([]*Maste
 	topRankers := make([]*MasteryStatisticsTopRankersMXDAO, 0, len(championIds)*topRanks)
 	for _, championId := range championIds {
 		var championRankers []*MasteryStatisticsTopRankersMXDAO
-		if err := db.Select(&championRankers, `
+		rankerQuery := `
 			SELECT
 				s.puuid,
 				s.game_name,
@@ -53,7 +54,25 @@ func GetMasteryStatisticsTopRankersMXDAOs(db db.Context, topRanks int) ([]*Maste
 			WHERE m.champion_id = ?
 			ORDER BY m.champion_points DESC
 			LIMIT ?
-		`, championId, topRanks); err != nil {
+		`
+		if models.MasteryNumericV2ReadsEnabled() {
+			rankerQuery = `
+				SELECT
+					s.puuid,
+					s.game_name,
+					s.tag_line,
+					s.profile_icon_id,
+					m.champion_id,
+					m.champion_points
+				FROM masteries_numeric_v2 m
+					FORCE INDEX (masteries_numeric_champion_points_level_covering_index)
+				LEFT JOIN summoners s ON m.summoner_fk = s.summoner_pk
+				WHERE m.champion_id = ?
+				ORDER BY m.champion_points DESC
+				LIMIT ?
+			`
+		}
+		if err := db.Select(&championRankers, rankerQuery, championId, topRanks); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				continue
 			}

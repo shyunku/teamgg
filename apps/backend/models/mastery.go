@@ -35,7 +35,27 @@ func (m *MasteryDAO) Upsert(db db.Context) error {
 
 func GetMasteryDAOs(db db.Context, puuid string) ([]*MasteryDAO, error) {
 	var masteries []*MasteryDAO
-	if err := db.Select(&masteries, "SELECT * FROM masteries WHERE puuid = ?", puuid); err != nil {
+	query := `
+		SELECT puuid, summoner_fk, champion_points_until_next_level,
+			chest_granted, champion_id, last_play_time, champion_level,
+			champion_points, champion_points_since_last_level, tokens_earned
+		FROM masteries
+		WHERE puuid = ?
+	`
+	if MasteryNumericV2ReadsEnabled() {
+		query = `
+			SELECT numeric_key.puuid, mastery.summoner_fk,
+				mastery.champion_points_until_next_level, mastery.chest_granted,
+				mastery.champion_id, mastery.last_play_time, mastery.champion_level,
+				mastery.champion_points, mastery.champion_points_since_last_level,
+				mastery.tokens_earned
+			FROM summoner_numeric_keys numeric_key
+			INNER JOIN masteries_numeric_v2 mastery
+				ON mastery.summoner_fk = numeric_key.summoner_id
+			WHERE numeric_key.puuid = ?
+		`
+	}
+	if err := db.Select(&masteries, query, puuid); err != nil {
 		return nil, err
 	}
 	return masteries, nil

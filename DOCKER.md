@@ -109,9 +109,50 @@ docker compose run --rm backend backfill-numeric-keys
 
 `NUMERIC_KEY_BACKFILL_BATCH_SIZE` defaults to `1000` (`10`-`10000`) and
 `NUMERIC_KEY_BACKFILL_WORK_LIMIT` defaults to `10m` (`1s`-`1h`). Re-run the
-command until it reports `ready=true`. Do not run it while the initial Champion
-Detail source backfill is active. This command does not switch constraints or
-remove legacy string identifiers.
+command until parents and generic children report complete. `ready` remains
+false until the compact mastery shadow is separately validated. Do not run it
+while the initial Champion Detail source backfill is active. This command does
+not switch constraints or remove legacy string identifiers.
+
+The 35-million-row `masteries` table is intentionally excluded from in-place
+numeric-key updates. After stopping backend writes, prepare its compact numeric
+shadow with the explicit maintenance command:
+
+```bash
+docker compose stop backend
+docker compose run --rm \
+  -e MASTERY_NUMERIC_SHADOW_OFFLINE_ACK=true \
+  backend prepare-mastery-numeric-shadow
+```
+
+`MASTERY_NUMERIC_SHADOW_BATCH_SIZE` defaults to `10000` (`100`-`100000`) and
+`MASTERY_NUMERIC_SHADOW_WORK_LIMIT` defaults to `10m` (`1s`-`1h`). The command
+also accepts `MASTERY_NUMERIC_SHADOW_MAX_BATCHES`; `0` disables the batch-count
+cap while retaining the work limit. The command
+creates no normal-startup migration and never renames or drops the legacy
+table. Re-run it until `copied=true validated=true`; keep the backend stopped
+until the read/write cutover procedure has been verified. Do not persist the
+offline acknowledgement as `true` in a production environment file.
+
+The command installs atomic legacy-to-shadow synchronization triggers only
+after the full copy checksum passes. The backend continues to write the legacy
+table, so rollback remains available. To switch reads after validation, set:
+
+```env
+MASTERY_READ_SOURCE=numeric_v2
+```
+
+Then start the backend and confirm `Mastery read source: numeric_v2` before
+checking summoner mastery and statistics APIs. Set it back to `legacy` and
+restart the backend for an immediate read rollback; synchronized writes keep
+the legacy table current.
+
+`MASTERY_NUMERIC_SHADOW_DISABLE_BINLOG` defaults to `false`. Set it to `true`
+only after confirming there are no replicas and explicitly accepting that the
+rebuildable shadow copy will not be present in point-in-time binlog recovery.
+The command fails before copying if the database account cannot change the
+session binlog setting. Never store either maintenance acknowledgement as
+`true` after the operation.
 
 Configure the production reverse proxy with at least a `250m` request body limit for replay uploads, a read timeout longer than `ANALYSIS_TIMEOUT`, and disabled buffering for SSE responses. Use HTTPS for both public APIs and keep the container ports bound to loopback whenever possible.
 

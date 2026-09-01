@@ -3,6 +3,7 @@ package statistics_models
 import (
 	"fmt"
 	"team.gg-server/libs/db"
+	"team.gg-server/models"
 	"time"
 )
 
@@ -40,7 +41,7 @@ func RefreshDirtyMasteryStatisticsAggregates(database db.Context, limit int) (*M
 	result := &MasteryStatisticsRefreshResult{DirtyChampions: len(championIds)}
 	for _, championId := range championIds {
 		var aggregate MasteryStatisticsMXDAO
-		if err := database.Get(&aggregate, `
+		aggregateQuery := `
 			SELECT
 				? AS champion_id,
 				COALESCE(MAX(champion_points), 0) AS max_mastery,
@@ -50,7 +51,22 @@ func RefreshDirtyMasteryStatisticsAggregates(database db.Context, limit int) (*M
 				COUNT(*) AS count
 			FROM masteries FORCE INDEX (masteries_champion_points_level_covering_index)
 			WHERE champion_id = ?
-		`, championId, championId); err != nil {
+		`
+		if models.MasteryNumericV2ReadsEnabled() {
+			aggregateQuery = `
+				SELECT
+					? AS champion_id,
+					COALESCE(MAX(champion_points), 0) AS max_mastery,
+					0 AS avg_mastery,
+					COALESCE(SUM(champion_points), 0) AS total_mastery,
+					COALESCE(SUM(IF(champion_level >= 7, 1, 0)), 0) AS mastered_count,
+					COUNT(*) AS count
+				FROM masteries_numeric_v2
+					FORCE INDEX (masteries_numeric_champion_points_level_covering_index)
+				WHERE champion_id = ?
+			`
+		}
+		if err := database.Get(&aggregate, aggregateQuery, championId, championId); err != nil {
 			return nil, fmt.Errorf("aggregate mastery champion %d: %w", championId, err)
 		}
 
