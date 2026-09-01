@@ -146,8 +146,10 @@ func main() {
 		options.Progress = func(progress migrations.MasteryNumericShadowResult) {
 			if progress.ProcessedThisRun%100000 == 0 || time.Since(lastProgressLog) >= 30*time.Second {
 				log.Infof(
-					"Mastery numeric shadow progress: processed=%d total=%d",
+					"Mastery numeric shadow progress: processed=%d total=%d batch=%s select=%s mapping=%s insert=%s",
 					progress.ProcessedThisRun, progress.ProcessedTotal,
+					progress.LastBatchDuration, progress.LastSelectDuration,
+					progress.LastMappingDuration, progress.LastInsertDuration,
 				)
 				lastProgressLog = time.Now()
 			}

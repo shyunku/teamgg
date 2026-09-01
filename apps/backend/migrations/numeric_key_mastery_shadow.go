@@ -41,10 +41,14 @@ type MasteryNumericShadowOptions struct {
 }
 
 type MasteryNumericShadowResult struct {
-	ProcessedThisRun int64
-	ProcessedTotal   int64
-	CopyCompleted    bool
-	Validated        bool
+	ProcessedThisRun    int64
+	ProcessedTotal      int64
+	CopyCompleted       bool
+	Validated           bool
+	LastBatchDuration   time.Duration
+	LastSelectDuration  time.Duration
+	LastMappingDuration time.Duration
+	LastInsertDuration  time.Duration
 }
 
 type masteryNumericShadowProgress struct {
@@ -173,7 +177,9 @@ func PrepareMasteryNumericShadow(
 	deadline := time.Now().Add(options.WorkLimit)
 	batches := 0
 	for !progress.CopyCompleted && time.Now().Before(deadline) && (options.MaxBatches == 0 || batches < options.MaxBatches) {
+		batchStarted := time.Now()
 		batchContext, cancelBatch := context.WithTimeout(ctx, options.BatchTimeout)
+		selectStarted := time.Now()
 		rows, err := selectMasteryNumericShadowBatch(
 			batchContext, connection, progress.CursorPuuid, progress.CursorChampionId, options.BatchSize,
 		)
@@ -181,6 +187,7 @@ func PrepareMasteryNumericShadow(
 			cancelBatch()
 			return result, err
 		}
+		result.LastSelectDuration = time.Since(selectStarted)
 		if len(rows) == 0 {
 			cancelBatch()
 			progress.CopyCompleted = true
@@ -190,17 +197,20 @@ func PrepareMasteryNumericShadow(
 			break
 		}
 
+		mappingStarted := time.Now()
 		mappings, err := loadMasteryNumericMappings(batchContext, connection, rows)
 		if err != nil {
 			cancelBatch()
 			return result, err
 		}
+		result.LastMappingDuration = time.Since(mappingStarted)
 		last := rows[len(rows)-1]
 		tx, err := beginNumericKeyBackfillTransactionOnConnection(batchContext, connection)
 		if err != nil {
 			cancelBatch()
 			return result, err
 		}
+		insertStarted := time.Now()
 		if err := copyMasteryNumericShadowBatch(batchContext, tx, rows, mappings); err != nil {
 			_ = tx.Rollback()
 			cancelBatch()
@@ -220,9 +230,11 @@ func PrepareMasteryNumericShadow(
 			cancelBatch()
 			return result, err
 		}
+		result.LastInsertDuration = time.Since(insertStarted)
 		cancelBatch()
 		result.ProcessedThisRun += int64(len(rows))
 		result.ProcessedTotal = progress.ProcessedRows
+		result.LastBatchDuration = time.Since(batchStarted)
 		batches++
 		if options.Progress != nil {
 			options.Progress(result)
