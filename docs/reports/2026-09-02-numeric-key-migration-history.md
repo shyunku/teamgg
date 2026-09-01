@@ -1,0 +1,172 @@
+# Task #64 숫자 키 전환 상세 이력
+
+> 이 문서는 장기 작업 중 수집한 상세 운영 기록의 보관본이다. 현재 상태와 결과는 `docs/tasks/064.md`에서 관리한다.
+
+## 작업 상태
+
+- 상태: 🟡 WIP
+- 태그: `backend`
+- 선행 작업: #60
+- 작업 보드: `docs/tasks.md`
+
+## 목적
+
+대용량 관계 테이블에 반복 저장된 PUUID, match ID, UUID 문자열 키를 숫자 PK·FK로 단계적으로 전환해 인덱스 크기와 JOIN 비용을 줄인다. 운영 호환성을 유지하기 위해 숫자 키를 먼저 추가하고 이중 쓰기·제한 백필·검증·읽기 전환을 거친 뒤, 레거시 문자열 키 제거는 별도 승인 후 진행한다.
+
+## 완료 조건
+
+- 부모 및 작업 범위 내 하위 테이블 숫자 키 백필 완료
+- 기존 문자열 관계와 숫자 관계의 전체 정합성 검증
+- 필요한 숫자 인덱스·FK 적용 및 운영 쿼리 계획 검증
+- 기능 플래그 기반 숫자 JOIN 읽기 전환과 성능 비교
+- 백엔드 API·DataExplorer·통계 기능 회귀 검증
+- 레거시 문자열 FK·인덱스 제거는 사용자 승인 전까지 수행하지 않음
+
+## 진행 기록
+
+### 2026-09-01 - 운영 read cutover·rollback 준비
+
+- validated shadow를 즉시 테이블 rename하지 않고 legacy `masteries`를 쓰기 원본으로 유지하는 단계적 전환을 구현했다. copy checksum 통과 후에만 legacy INSERT/UPDATE/DELETE를 `masteries_numeric_v2`에 같은 트랜잭션으로 동기화하는 trigger 3개가 설치된다.
+- `MASTERY_READ_SOURCE=legacy|numeric_v2` 설정을 추가했다. 기본값은 `legacy`이며 `numeric_v2` 기동 시 shadow schema, copy 완료, validated 상태와 sync trigger를 검사해 하나라도 누락되면 backend 시작을 거부한다.
+- 소환사 숙련도 조회, 숙련도 집계 갱신, 챔피언별 Top ranker 조회가 feature flag에 따라 numeric shadow와 숫자 JOIN을 사용하도록 분기했다. 쓰기는 legacy에 유지되므로 장애 시 환경변수를 `legacy`로 되돌리고 재시작하면 즉시 읽기 rollback할 수 있다.
+- 격리 MySQL 8.0.20의 10만 행 fixture에서 copy·재개·checksum에 더해 legacy UPDATE와 DELETE가 shadow에 반영되는 것을 검증했다. 관련 모델·통계 단위 테스트도 통과했다.
+- binlog는 기본 유지한다. replica가 없고 운영자가 명시적으로 승인한 경우에만 `MASTERY_NUMERIC_SHADOW_DISABLE_BINLOG=true`로 해당 재생성 세션의 binlog를 끌 수 있게 했으며 권한이 없으면 copy 전에 실패한다.
+- 실제 운영 실행 전 현재 replica, binlog, 디스크 여유와 예상 shadow 크기를 다시 측정하고 binlog 비활성화 여부를 사용자에게 승인받아야 한다.
+- Task #64 변경을 `41b6669`로 분리 커밋·푸시하고 운영 checkout을 fast-forward했다. 새 backend 이미지는 사전 빌드했지만 실행 중인 기존 backend 컨테이너는 교체하지 않아 현재 서비스는 계속 healthy다.
+- 운영 루트 볼륨은 128GiB 중 28GiB 여유, 사용률 79%다. 최근 30분 로그에는 DataExplorer deadlock 3건이 있어 shadow copy 동안 backend와 DataExplorer를 모두 중지하는 조건을 유지한다.
+- 실제 copy는 binlog를 유지한 채 제한 표본부터 시작해 shadow·binlog·전체 디스크 증가량을 측정한다. 최종 예상 여유가 12GiB 미만이면 copy를 계속하지 않고 새 shadow만 정리한 뒤 legacy backend를 복구하는 절차가 필요하다.
+- 2026-09-01 21:45 KST에 운영 backend를 중단하고 `teamgg-mastery-shadow-task64` detached 컨테이너로 최대 1시간의 전체 shadow copy를 시작했다. batch 10,000, binlog 유지, offline acknowledgement 적용 상태다.
+- 호스트 감시 프로세스가 30초마다 루트 볼륨을 확인하며 여유가 12GiB 미만이면 해당 copy 컨테이너만 자동 중단한다. 시작 직후 컨테이너와 감시 로그가 정상이며 약 28.9GB가 사용 가능했다. 사용자 요청에 따라 완료를 기다리지 않고 다음 확인 시점까지 backend는 중단 상태로 둔다.
+- 2026-09-01 22:02 KST 중간 확인 시 copy 컨테이너는 약 16분째 실행 중이지만 shadow 파일은 초기 할당 크기 10MiB에 머물고 완료 로그도 없어 첫 batch가 아직 커밋되지 않은 것으로 추정한다. MySQL은 약 25% CPU, 호스트 I/O wait는 약 35%로 실제 디스크 작업 중이며 정지 상태는 아니다. 여유 공간은 약 29.1GB로 12GiB 안전선과 충분히 떨어져 있어 작업을 중단하지 않았다.
+- 2026-09-01 22:46 KST 재확인 시 약 1시간이 경과했지만 컨테이너는 계속 실행 중이고 shadow 파일은 15MiB에 불과해 첫 10,000행 batch도 완료되지 않은 것으로 판단한다. MySQL은 약 21% CPU, I/O wait 약 37%로 SQL을 처리 중이며 디스크 여유는 약 29.1GB다. 현재 work limit은 batch 사이에서만 검사되어 단일 장기 SQL을 강제로 취소하지 못하는 문제가 확인됐다.
+- 실제 작업은 약 65분 뒤 `processed=60000 total=60000 copied=false validated=false`로 종료됐다. 약 3,579만 행 기준 0.17%이며 backend가 추가로 중단돼 있던 것을 확인한 즉시 새 이미지의 legacy read backend를 기동해 health와 루트 API를 복구했다.
+- 운영 병목은 PK 범위와 숫자 매핑 JOIN을 하나의 `INSERT ... SELECT`로 결합해 옵티마이저가 범위 제한 전에 대형 JOIN 계획을 선택할 수 있게 한 구조였다. 로컬 fixture는 276MB로 작고 연속적이어서 잘못된 계획 비용을 드러내지 못했다.
+- copy를 `masteries` PRIMARY keyset의 원본 행 선조회, 해당 batch의 고유 PUUID만 숫자 mapping index로 별도 조회, 500행 단위 `VALUES` bulk insert로 분리했다. source 범위 SQL에는 JOIN이 존재하지 않도록 회귀 테스트를 추가했다.
+- batch마다 기본 2분 hard context timeout을 적용하고 10만 행 또는 30초마다 진행 로그를 남긴다. stale partial shadow와 cursor만 제거하는 `reset-mastery-numeric-shadow` command는 offline/reset 이중 승인 없이는 실행을 거부한다.
+- 수정 후 격리 MySQL 10만 행에서 첫 1,000행 141ms, 나머지 99,000행 copy+검증 3.001초, 전체 통합 테스트 8.14초를 기록했다. legacy 동기화·checksum·read cutover와 실제 reset까지 통과했으며 전체 Go 테스트, vet, build도 통과했다.
+- 수정 커밋 `da95a4b`를 운영 배포한 첫 10만 행 smoke는 성공했고, 추가 단일 batch 계측에서 command 시작 preflight 약 43초와 실제 10,000행 batch 643ms를 분리했다. batch 내부는 source SELECT 160ms, mapping 2.5ms, bulk insert+commit 480ms였다.
+- 단계별 timing 계측 커밋 `040b395`를 추가 배포하고 2026-09-02 00:05 KST에 partial shadow를 재초기화한 뒤 전체 copy를 `teamgg-mastery-shadow-task64-v2` detached 컨테이너로 재개했다. 12GiB 디스크 안전 감시를 다시 적용했다.
+- preflight 이후 22초 동안 40만 행을 추가 처리해 누적 41만 행에 도달했다. 최근 batch는 약 0.46~0.74초, 실처리율은 약 18,000행/초이며 기존 60,000행/65분 병목이 제거됐음을 운영에서 확인했다. backend는 copy 정합성을 위해 중단 상태로 유지한다.
+- 재개 15분 시점에는 누적 251만 행, 약 7.0%였지만 source SELECT가 134ms에서 3.5~6.4초까지 cursor 진행량에 비례해 증가했다. row-constructor `(puuid, champion_id) > (?, ?)`가 운영에서 앞부분을 반복 스캔하는 O(n²) 패턴으로 확인돼 작업을 중단하고 legacy backend를 healthy로 복구했다.
+- cursor predicate를 `puuid > ? OR (puuid = ? AND champion_id > ?)` 명시적 복합 PK range로 변경했다. row-constructor 재도입을 막는 회귀 테스트와 `EXPLAIN FORMAT=JSON`에서 `PRIMARY`·`range` access를 요구하는 실제 MySQL 통합 검증을 추가했다.
+- 격리 MySQL 10만 행에서 첫 1,000행 153ms, 나머지 99,000행 copy+검증 2.614초, 전체 7.30초로 통과했다. 운영 재배포 후 partial shadow를 다시 초기화하고 후반 cursor에서도 SELECT 시간이 일정한지 smoke 검증한 뒤 전체 copy를 재개한다.
+- 운영 251만 cursor에서 명시적 range smoke를 실행해 SELECT가 153ms로 다시 일정해졌음을 확인했다. 다만 PRIMARY와 함께 생성한 covering secondary index 유지 때문에 insert+commit이 4.77초로 증가해 전체 환산 약 4~5시간이었다.
+- copy용 shadow는 PRIMARY만 생성하고 전체 checksum 통과 후 covering index를 한 번에 bulk build하도록 변경했다. cutover readiness는 최종 index가 존재하기 전까지 통과하지 않으며 index build 실패 시 validated 상태도 저장하지 않는다.
+- 격리 MySQL 10만 행 전체 검증에서 첫 1,000행 93ms, 나머지 99,000행 copy+checksum+covering index build 2.592초를 기록했다. 최종 shadow 크기는 13.66MB에서 11.57MB로 더 줄어 legacy 대비 62.31% 감소했고 reset·trigger·readiness까지 통과했다.
+- 최종 최적화 `84cf9ba`를 운영 배포하고 shadow를 재초기화한 뒤 100만 행 smoke를 수행했다. preflight 이후 100만 행은 약 40초, batch 0.36~0.44초, SELECT 113~130ms, insert+commit 245~302ms로 cursor와 table 성장에도 일정했다.
+- 2026-09-02 00:40 KST에 유효한 100만 cursor에서 `teamgg-mastery-shadow-task64-final` detached 전체 copy를 시작했다. 예상 copy 시간은 약 24분이며 checksum과 covering index bulk build 시간이 추가된다. 시작 시 디스크 여유 약 27.4GB, 12GiB 자동 중단 감시가 동작 중이고 backend는 정합성을 위해 중단 상태다.
+- 2026-09-02 00:48 KST 중간 확인 시 누적 1,260만 / 약 3,579만 행, 약 35.2%다. batch는 약 0.34~0.42초, SELECT 104~130ms, insert 235~310ms로 일정하며 O(n²) 재발이 없다. shadow 파일은 약 1.14GB, 디스크 여유는 약 28.0GB로 안전 감시 기준과 충분히 떨어져 있다.
+- 2026-09-02 01:09 KST 재확인 시 최종 row copy는 이번 실행 4,220만 행, 기존 smoke 100만 행을 합쳐 누적 4,320만 행까지 진행한 뒤 추가 batch 로그가 멈췄다. 앞서 사용한 약 3,579만 행은 테이블 통계 기반 추정치였고, keyset cursor가 실제로 순회한 누적값 4,320만 행이 더 정확하다. 마지막 batch도 약 0.35~0.46초, SELECT 98~120ms, insert 242~370ms로 안정적이었다.
+- maintenance 컨테이너는 계속 실행 중이며 row copy 종료 후 전체 source/shadow checksum 검증 또는 후속 covering index 생성 단계로 판단한다. 아직 `finished`/`validated=true` 로그가 없으므로 완료로 처리하지 않는다. shadow 파일은 약 3.85GB, 루트 볼륨 여유는 약 23.6GB(표시상 23GiB)로 12GiB 자동 중단 기준보다 충분히 높다. backend는 정합성 유지를 위해 계속 중단 상태이고 replay analyzer만 healthy다.
+- 2026-09-02 01:29 KST에 최종 maintenance 컨테이너가 종료 코드 0으로 완료됐다. 이번 실행 42,275,694행과 기존 smoke 1,000,000행을 합친 실제 shadow 행 수는 43,275,694행이며, 전체 source/shadow checksum과 후속 covering index 생성을 통과해 `copied=true validated=true`가 기록됐다.
+- 최종 `masteries_numeric_v2.ibd` 크기는 5,347,737,600 bytes(약 4.98GiB)다. 완료 후 루트 볼륨은 128GiB 중 약 21GiB 여유, 사용률 84%이며 12GiB 안전선 침범 없이 감시 프로세스도 정상 종료했다. backend는 아직 중단 상태이고 replay analyzer만 healthy다. 다음 단계는 legacy read로 backend를 먼저 복구·회귀 검증한 뒤 별도 단계에서 `numeric_v2` 읽기 전환을 검증하는 것이다.
+- 2026-09-02 01:44 KST에 backend를 현재 운영 설정으로 복구했다. startup 로그에서 `Mastery read source: legacy`를 확인했고 컨테이너 health가 healthy로 전환됐다. 루트 API는 정상 버전 JSON을 반환했으며 champion 통계와 meta-summary API가 모두 HTTP 200을 반환했다. 기동 후 최근 로그에는 ERROR, panic, deadlock, strict scan 오류가 없었다. validated shadow는 그대로 보존하며 numeric_v2 읽기 전환은 아직 수행하지 않았다.
+- 캐시된 HTTP 응답 시간과 실제 DB 쿼리 성능을 분리하기 위해 명시적 읽기 전용 `benchmark-mastery-reads` maintenance command를 추가했다. 동일 PUUID·챔피언 표본으로 legacy/numeric_v2 SQL을 번갈아 실행하고 payload 정합성, p50·p95·평균을 비교한다. 타깃·전체 Go 테스트, vet, build를 통과하고 `e167d11`로 배포했다. 첫 운영 smoke에서 벤치마크 alias의 MySQL 예약어 충돌을 발견해 `6075604`로 수정했다.
+- 첫 5명·3챔피언 smoke에서 결과는 일치했지만 numeric Top ranker가 약 3.16초로 legacy 1.37ms보다 비정상적으로 느렸다. nullable 전환 컬럼 `summoners.summoner_pk`에 아직 인덱스가 없는 상태에서 직접 JOIN한 것이 원인이었다. numeric key의 PK와 PUUID unique index를 거쳐 `summoners` legacy PK로 JOIN하도록 수정하고 회귀 테스트를 보강해 `259de06`으로 배포했다.
+- 수정 후 기본 표본 20명·10챔피언·5회에서 모든 결과가 일치했다. 소환사 lookup p50은 legacy 0.959ms 대비 numeric 0.774ms(1.24배), 챔피언 aggregate p50은 147.667ms 대비 112.564ms(1.31배)로 개선됐다. Top ranker p50은 1.388ms 대비 1.943ms로 0.555ms 느렸지만 병목 전 3.16초에서 밀리초 수준으로 정상화됐다. p95는 각각 lookup 1.747/1.419ms, aggregate 233.071/163.996ms, ranker 1.681/3.123ms였다.
+- 별도 `127.0.0.1:17713` canary를 `MASTERY_READ_SOURCE=numeric_v2`로 기동해 readiness 검사와 실제 API 경로를 검증했다. 동일 `션 쿠#션 쿠` 소환사 요청은 legacy와 numeric 모두 HTTP 200, 669,744 bytes였으며 전체 응답 SHA-256이 일치했다. canary와 임시 응답 파일은 검증 후 제거했고 운영 backend는 legacy 모드 healthy, 최근 오류 없음 상태를 유지한다. 실제 운영 numeric_v2 전환은 아직 수행하지 않았다.
+- 2026-09-02 02:33 KST에 운영 환경의 `MASTERY_READ_SOURCE=numeric_v2` 전환과 backend 재생성을 완료했다. 운영 revision은 `6273dca`, backend는 healthy이며 startup 로그에서 numeric_v2 read source가 확인됐다. 루트·champion·meta-summary API와 실제 숙련도 데이터가 포함된 `션 쿠#션 쿠` 소환사 API가 모두 HTTP 200을 반환했고 최근 ERROR, panic, deadlock, strict scan 오류는 없다. 숙련도 shadow copy·검증·동기화·성능 비교·실제 운영 읽기 전환 단계는 완료됐다.
+
+### 2026-09-01 - 격리 MySQL shadow copy 검증
+
+- 로컬 서비스와 분리된 MySQL 8.0.20 임시 인스턴스를 `127.0.0.1:33306`에 띄워 실제 schema 생성, copy, 재시작, 검증 경로를 실행했다. 검증 종료 후 인스턴스와 전용 임시 데이터 디렉터리를 모두 제거했으며 기존 3306 MySQL은 건드리지 않았다.
+- 실제 MySQL 통합 테스트를 추가해 offline acknowledgement 거부, advisory lock 중복 실행 차단, 첫 1,000행 제한 실행, 저장된 `(puuid, champion_id)` cursor 재개, 완료 후 무변경 재실행을 검증했다.
+- legacy `masteries.summoner_fk`가 전 과정에서 NULL로 유지됨을 확인해 일반 in-place UPDATE가 발생하지 않음을 증명했다. 숫자 read 결과 일치, shadow 고의 손상 시 checksum 실패, 데이터 복구 후 재검증 성공도 확인했다.
+- 초기 5,000행 batch 구현은 100만 행 fixture에서 약 1,400행/초로 느려 중단했다. shadow 전용 batch 범위를 100~100,000행으로 조정하고 row-constructor keyset 범위 `(puuid, champion_id) > (?, ?)`와 `<= (?, ?)`를 사용하도록 최적화했다.
+- 10만 행 검증에서 legacy는 30,687,232 bytes, shadow는 13,664,256 bytes로 55.47% 감소했다. 100만 행 검증에서는 fixture 생성 27.326초, 첫 1,000행 2.645초, 나머지 999,000행 copy+검증 1분 43.481초를 기록했다.
+- 100만 행의 legacy는 275,775,488 bytes, shadow는 112,492,544 bytes로 59.21% 감소했다. copy+검증 처리율은 약 9,650행/초이며 단순 환산한 운영 3,579만 행 최소치는 약 62분이지만, 운영 I/O와 binlog를 고려해 더 긴 maintenance window가 필요하다.
+- MySQL 통합 테스트 뒤 backend 전체 `go test ./...`, `go vet ./migrations`, `go build ./...`를 통과했다. 운영 DB와 서비스에는 이번 검증 단계에서 변경을 적용하지 않았다.
+
+### 2026-09-01 - `masteries` compact shadow 전환 재설계
+
+- 운영 `masteries` 3,579만 행을 in-place UPDATE한 뒤 숫자 PK로 다시 rebuild하는 이중 쓰기 방식을 폐기했다. generic child backfill spec과 검증 범위에서 `masteries` UPDATE를 제거하고 별도 shadow readiness로 분리했다.
+- PUUID를 저장하지 않고 `PRIMARY KEY (summoner_fk, champion_id)`와 숫자 PK suffix를 사용하는 `masteries_numeric_v2` 목표 스키마를 정의했다.
+- 명시적 `prepare-mastery-numeric-shadow` maintenance command를 추가했다. 정상 startup과 `migrate`에서는 실행되지 않으며 `MASTERY_NUMERIC_SHADOW_OFFLINE_ACK=true`가 없으면 시작을 거부한다.
+- 기존 `(puuid, champion_id)` PK cursor, bounded batch/work limit, 동일 트랜잭션 progress 저장, MySQL advisory lock, 재실행 가능한 upsert, source/shadow 행 수와 전체 row checksum 검증을 구현했다.
+- online mirror trigger가 shadow 장애를 사용자 write로 전파할 위험을 피하기 위해 첫 구현은 backend write가 중지된 maintenance window 전용으로 확정했다. copy 실패 시 legacy table은 변경되지 않는다.
+- 잘못 생성된 shadow를 재사용하지 않도록 PUUID 컬럼 부재, numeric PRIMARY와 covering index 구성을 실행 전 검증한다.
+- 환경변수 예시와 Docker 운영 명령, 상태 머신·rollback·안전 경계를 문서화했다. migrations 타깃 테스트, backend 전체 Go 테스트와 전체 빌드를 통과했다.
+- 실제 MySQL schema 생성·copy·checksum·재시작 검증은 다음 격리 MySQL 단계로 남겼고, 운영 DB에는 이번 단계를 적용하지 않았다.
+
+### 2026-09-01 - 운영 strict scan 오류 핫픽스
+
+- 숫자 하위 키 배포 후 전적 조회에서 `missing destination name match_participant_fk in *[]mixed.MatchParticipantExtraMXDAO`가 발생해 사용자 승인으로 backend를 중지했다.
+- `SELECT m.*, mp.*, mpd.*`는 `mpd.match_participant_fk`가 아니라 unqualified `match_participant_fk` label을 반환하지만 DTO와 기존 회귀 테스트가 잘못된 qualified tag를 기대한 것이 원인이다.
+- 실제 MySQL 결과 column label을 기준으로 실패 테스트를 먼저 추가해 동일 오류를 재현한 뒤 DTO tag를 최소 수정했다. 타깃 회귀 테스트, backend 전체 Go 테스트와 전체 빌드를 통과했다. 이번 단계에서는 커밋·배포·재기동하지 않았다.
+- 핫픽스 코드와 회귀 테스트만 `f271d60`으로 분리 커밋해 `origin/master`에 푸시했다. 운영 checkout이 clean인 상태에서 fast-forward하고 backend 이미지만 rebuild·재기동했다.
+- backend와 replay analyzer가 healthy이며 실제 소환사 전적, champion 통계, meta-summary API가 모두 HTTP 200을 반환했다. 배포 후 최근 로그에 `missing destination`, `ERROR`, deadlock, panic이 없음을 확인했다.
+- `Innodb_row_lock_current_waits`와 `information_schema.innodb_metrics`에는 46이 남아 있지만 실제 `performance_schema.data_lock_waits` edge는 0건이고 `trx_wait_started`가 설정된 대기 트랜잭션도 없다. 현재 blocker/waiter 부재를 실제 lock wait table 기준으로 확인했다.
+- 배포 후 디스크는 128GiB 중 약 27GiB 여유, 사용률 80%다. 기존 숫자 키 백필은 재개하지 않았다.
+
+### 2026-08-31 - 기반 스키마와 운영 호환성 보완
+
+- additive foundation 마이그레이션 `20260830_005`를 운영에 적용했다.
+- nullable 숫자 키를 DAO가 안전하게 읽도록 scan 호환성을 보완했다.
+- 참가자가 소환사보다 먼저 저장될 수 있는 기존 흐름은 `20260831_006`에서 Riot 문자열 ID 기준으로 숫자 부모 identity를 선점하도록 수정했다.
+- 영향받은 경기 작업의 자동 재시도와 저장 복구, 백엔드·리플레이 health, 통계 API 200을 확인했다.
+
+### 2026-08-31 - 하위 테이블 숫자 키와 제한 백필
+
+- `20260831_007`에서 핵심 관계 테이블 8개에 nullable 숫자 FK 컬럼 10개와 이중 쓰기 트리거 16개를 추가했다.
+- 하위 테이블을 작은 배치와 제한 시간으로 처리하는 재시작 가능 백필을 구현했다.
+- DataExplorer 작업 claim의 대규모 filesort·잠금 범위를 줄이기 위해 `20260831_008`의 내림차순 claim 인덱스를 추가하고 강제 사용하도록 수정했다.
+- 운영 EXPLAIN에서 소환사 claim 예상 스캔이 약 817,183행과 filesort에서 1행·covering index 사용으로 개선됐다.
+- 경기 저장 트랜잭션이 참가자 PUUID 숫자 키를 정렬된 순서로 선점하도록 수정해 경기 작업끼리의 잠금 순서 역전을 제거했다.
+
+### 2026-08-31 - 운영 백필 방식 조정
+
+- DataExplorer가 활성화된 상태에서 큰 백필 배치가 같은 숫자 키 매핑 행을 점유하면 여전히 교착이 발생함을 운영 deadlock 로그로 확인했다.
+- API는 유지하되 DataExplorer만 끈 임시 유지보수 백엔드를 띄우고, 별도 제한 백필 컨테이너를 실행한 뒤 정상 백엔드를 자동 복구하는 방식으로 전환했다.
+- 5분·10분 단위 실행에서 오류와 deadlock 없이 소환사 부모 백필을 완료하고 경기 부모 키를 누적 583,500건 처리했다.
+- 배치 1,000은 배치 500 대비 처리량 개선이 없어 안전한 500으로 되돌렸다.
+- 현재 20분 제한 실행을 진행 중이며, API 200과 유지보수 백엔드 health를 유지하고 있다.
+
+### 2026-08-31 - 20분 부모 키 백필 결과
+
+- 20분 제한 실행을 오류·deadlock 없이 마치고 정상 백엔드로 자동 복구했다.
+- 경기 부모 키 누적 처리량은 726,000건이다.
+- 운영 DB 읽기 전용 집계 결과 전체 경기 824,388건 중 숫자 키 미설정은 92,526건이며, `match_numeric_keys`에는 신규 쓰기 선점분을 포함해 731,986건이 존재한다.
+- 실제 `performance_schema.data_lock_waits`는 0, 백엔드 health와 API 200, 여유 디스크 약 17GB를 확인했다.
+- 다음 20분 실행에서 경기 부모 백필을 완료하고 participant 백필 처리율을 측정한다.
+
+### 2026-08-31 - 경기 부모 완료 및 participant 쿼리 병목 수정
+
+- 두 번째 제한 실행에서 경기 부모 키 백필이 누적 818,526건, `completed=1`로 완료됐다. 신규 쓰기에서 이미 숫자 키가 설정된 행을 제외한 처리량이므로 전체 경기 824,388건과 차이가 난다.
+- participant 첫 500건의 기존 UPDATE가 5분 37초 이상 실행되는 것을 확인하고 해당 백필 컨테이너만 중단했다. 첫 participant 배치는 커밋 전이어서 롤백됐고 정상 백엔드는 자동 복구됐다.
+- `performance_schema.data_lock_waits=0`으로 교착이나 잠금 대기가 아니라 실행계획 병목임을 확인했다.
+- 원인은 #63에서 제거한 `match_participants(match_participant_id)` 문자열 인덱스에 새 백필 JOIN이 의존한 것이다. 인덱스를 다시 추가하지 않고, 선택 단계에서 부모 숫자 ID를 가져온 뒤 숫자 매핑을 bulk upsert하고 원본 행은 기존 복합 PK `(match_id, participant_id)`로 갱신하도록 변경했다.
+- 부모 숫자 키 누락은 LEFT JOIN과 명시적 검증으로 즉시 오류 처리해 unresolved 행을 건너뛰지 않도록 했다.
+- 제거된 문자열 인덱스가 없는 테스트 스키마로 회귀 조건을 강화했다.
+- 로컬 migration 타깃 테스트, 백엔드 전체 Go 테스트와 전체 빌드를 통과했다. 로컬 Docker 데몬이 꺼져 있어 실제 MySQL 통합 테스트는 실행하지 못했으며, 운영 배포 후 500건 제한 검증을 완료하기 전에는 전체 백필을 재개하지 않는다.
+- 첫 운영 1분 smoke에서는 수정된 UPDATE가 아니라 participant 후보 SELECT가 1분 45초 이상 실행됐다. JOIN이 `LIMIT 500` 선필터보다 먼저 평가되는 실행계획이 원인이며 lock wait는 0이었다. smoke 컨테이너만 중단해 미커밋 배치를 롤백하고 정상 백엔드 healthy/API 200을 복구했다.
+- participant 후보 500건을 복합 PK 순서로 파생 테이블에 먼저 materialize한 뒤, 제한된 결과에만 부모 숫자 키를 LEFT JOIN하도록 2차 수정했다. 타깃 테스트, 전체 Go 테스트와 빌드를 다시 통과했다.
+- 2차 운영 smoke는 과거 participant `KR_7098932408/1`의 부모 숫자 키 누락을 감지해 배치를 커밋하지 않고 종료했다. 운영 조회 결과 match 원본·숫자 키는 존재하지만 해당 PUUID는 `summoners` 원본과 숫자 identity가 모두 없는 역사적 고아 참조였다.
+- 새 participant 쓰기에서 이미 사용하는 identity 선점 정책과 맞추기 위해, 과거 participant 배치도 원본 프로필을 생성하지 않고 match ID·PUUID 숫자 identity만 정렬된 순서로 bulk 선점하도록 3차 수정했다. 후보 조회는 JOIN 없는 기존 복합 PK 스캔으로 되돌리고, 이후 숫자 매핑과 원본 행을 제한 배치로 갱신한다.
+- 실제 문자열 participant 보조 인덱스가 없는 테스트 스키마에 역사적 고아 participant fixture와 identity 일관성 검증을 추가했다. 타깃 테스트, 전체 Go 테스트와 빌드를 통과했다.
+- 3차 운영 1분 smoke에서 participant 77,000건을 오류·deadlock 없이 처리하고 정상 백엔드로 자동 복구했다. 과거 고아 PUUID는 `summoners` 원본을 생성하지 않은 채 숫자 identity만 예약됐으며, 대상 participant의 숫자 PK·match FK·summoner FK가 모두 채워졌다.
+- smoke 전후 여유 공간이 약 492MB 감소해 장기 실행을 보류하고 디스크 원인을 조사했다. 운영 MySQL은 `binlog_format=ROW`, `binlog_row_image=FULL`, 보존 3일이며 binlog 약 6.5GB가 존재한다. 큰 participant 원본 행 전체가 변경마다 기록되어 전체 백필 시 디스크 고갈 위험이 있다.
+- 복제/PITR 기록을 끄지 않으면서 변경된 PK·숫자 컬럼만 기록하도록 숫자 키 백필 트랜잭션 세션에 `binlog_row_image=MINIMAL`을 적용했다. 설정 권한이 없으면 DML 전에 롤백하고 실패한다. 타깃 테스트, 전체 Go 테스트와 빌드를 통과했으며 운영 1분 smoke로 binlog 증가량을 비교할 예정이다.
+- MINIMAL 적용 후 1분 smoke에서 participant 78,500건을 처리했고 binlog 증가는 약 36.8MB로 FULL 대비 약 87% 감소했다. 5분 연속 표본에서는 482,000건(약 96,400건/분), 매핑 테이블 약 109MB, binlog 약 195MB, 전체 디스크 약 456MB 증가를 기록했다. 오류·deadlock 없이 정상 백엔드로 복구했다.
+- 남은 participant 약 1,064만 건은 약 110분과 디스크 약 10GB가 추가로 필요할 것으로 추정된다. 현재 여유 공간은 약 16.87GB이며 블록 장치에 미확장 공간은 없다. participant만 완료해도 약 6.8GB만 남아 하위 테이블·최종 숫자 인덱스까지 안전하게 진행할 수 없다.
+- MySQL binlog는 약 6.5GB, 보존 기간 3일이며 가장 오래된 파일도 2026-09-01 15:21 KST 전에는 자동 만료되지 않는다. 볼륨 확장, PITR 보존 축소/명시적 binlog 정리, 또는 12GB 안전선까지만 제한 진행 중 하나를 사용자와 결정하기 전까지 장기 백필을 보류한다.
+
+## 현재 상태
+
+- 부모 키: `summoners`와 `matches` 숫자 identity 백필 완료
+- Participant: 제한 운영 검증과 쿼리·binlog 최적화는 완료했지만 전체 약 1천만 행 규모의 숫자 PK/FK 백필은 미완료
+- 하위 키: participant 완료 후 나머지 관계 테이블 숫자 키 백필·정합성 검증·필수 인덱스/FK 적용 필요
+- 숙련도: 43,275,694행 compact shadow copy, 전체 checksum, covering index, legacy 쓰기 동기화 trigger, 직접 SQL 성능 비교, API canary 및 운영 `numeric_v2` 읽기 전환 완료
+- 운영 API: revision `6273dca`, backend healthy, 실제 소환사·champion·meta-summary API HTTP 200, 최근 관련 오류 없음
+- 디스크: 128GiB 중 약 20GiB 여유, 사용률 85%. 나머지 대규모 백필은 #66 보존·정리 작업과 디스크 증가량을 함께 고려해야 함
+- Task 상태: 숙련도 전환 하위 단계는 완료됐지만 participant·하위 관계 전체 전환이 남아 있어 #64 전체는 WIP 유지
+
+## 위험 및 운영 판단
+
+- 현재 여유 디스크로 전체 숫자 인덱스·FK를 한 번에 추가하기에는 부족할 수 있다.
+- 백필 완료 후 실제 NULL 잔여량과 테이블·인덱스 크기를 측정해 디스크 확장 또는 단계별 인덱스 교체 여부를 사용자와 결정한다.
+- 다른 프로젝트와 컨테이너는 건드리지 않으며 광범위한 Docker cache prune은 수행하지 않는다.
+- 오류, deadlock, API 장애 또는 여유 디스크 12GB 미만이 확인되면 현재 백필만 중단하고 정상 백엔드를 복구한다.
+
+## 최종 정리
+
+작업 완료 후 결과, 전후 지표, 적용 마이그레이션, 운영 검증 및 잔여 후속 작업을 이 절에 정리한다.

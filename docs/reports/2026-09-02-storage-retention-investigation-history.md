@@ -1,0 +1,130 @@
+# Task #66 데이터 보존·아카이브 상세 조사 이력
+
+> 이 문서는 용량 조사와 긴급 정리의 상세 기록 보관본이다. 현재 상태와 다음 작업은 `docs/tasks/066.md`에서 관리한다.
+
+## 작업 상태
+
+- 상태: 🟡 WIP
+- 태그: `backend`
+- 시작: 2026-09-01 14:03 KST
+- 선행 작업: #58, #59
+- 작업 보드: `docs/tasks.md`
+
+## 목적
+
+운영 MySQL과 호스트 디스크의 지속적인 증가를 제어한다. 즉시 회수 가능한 빌드·로그·마이그레이션 부산물과 서비스에서 더 이상 사용하지 않는 오래된 경기·패치·숙련도 데이터를 구분하고, 검증 가능한 압축 아카이브와 제한된 정리 작업을 구현한다.
+
+## 완료 조건
+
+- Docker, MySQL binlog, 테이블·인덱스별 현재 사용량과 회수 후보 산정
+- 실제 API·통계 조회가 요구하는 패치·기간 범위 확인
+- 데이터 유형별 hot/archive/delete 보존 정책 확정
+- 아카이브 manifest에 범위·행 수·체크섬을 기록하고 검증 완료 전 원본을 삭제하지 않음
+- dry-run, 작은 배치, 재시작 cursor, 실행 시간·디스크·잠금 안전 경계를 갖춘 정리 작업 구현
+- 자식부터 부모 순서의 참조 정합성 유지와 운영 규모 검증
+- 정리 전후 디스크·행 수·API·통계 결과 비교
+
+## 안전 원칙
+
+- 사용자 승인 전 `DELETE`, `TRUNCATE`, `DROP`, binlog purge, Docker prune을 실행하지 않는다.
+- 여유 디스크가 부족하므로 전체 정렬·대형 임시 테이블·테이블 rebuild를 유발하는 조사 쿼리를 피한다.
+- 운영 조회에 필요한 데이터와 사용자 계정·내전 구성·리플레이 분석 결과는 자동 정리 대상에서 제외한다.
+- 일반 `DELETE`는 InnoDB 내부 재사용 공간만 만들 수 있으므로 OS 공간 반환 여부를 별도로 구분한다.
+
+## 진행 기록
+
+### 2026-09-01 14:03 - 조사 시작
+
+- 운영 루트 파일시스템은 128GB 중 121GB 사용, 약 7.8GB 여유, 사용률 94%다.
+- 상위 사용처는 MySQL 약 83GB, Docker 약 14GB다.
+- Task #64 장기 백필은 중단 상태이며 백엔드와 리플레이 서비스는 healthy다.
+- 메타데이터와 인덱스 기반 조회부터 수행해 즉시 회수 후보와 8개 패치 이전 데이터 범위를 산정한다.
+
+### 2026-09-01 14:16 - 운영 용량·보존 후보 조사
+
+- 삭제·purge·prune 없이 운영 MySQL, Docker, 파일시스템을 조회했다.
+- 루트 파일시스템은 128GB 중 121GB 사용, 7.7GB 여유, 사용률 95%다.
+- MySQL은 약 83GB, Docker는 약 14GB를 사용한다.
+- Docker BuildKit 캐시는 6.346GB 전부 reclaimable이다. dangling image는 20개지만 공유 layer가 있으므로 표시 크기를 단순 합산하지 않는다. 볼륨은 정리 대상에서 제외한다.
+- MySQL binlog는 13개 파일, 합계 11.94GiB다. 보존 기간은 72시간, row image는 `FULL`이며 replica는 등록되어 있지 않다. 24시간 보존으로 변경하면 현재 시점 기준 약 4GiB부터 회수할 수 있으나 PITR 가능 기간이 줄어드므로 사용자 승인 전 변경하지 않는다.
+- `summoner_matches_legacy_20260820`은 897,789행, 약 304MB다. 모든 legacy 행이 현재 `summoner_matches`에 존재하고 코드에서는 마이그레이션 롤백 백업으로만 언급된다. 운영 검증 완료를 전제로 drop 후보지만 사용자 승인 전 유지한다.
+- DataExplorer 완료 작업은 summoner 18,254행, match 48,490행이다. 별도 processing state가 유지되므로 기존 bounded cleanup으로 제거할 수 있다. 반면 summoner pending 1,648,660행이 queue 대부분을 차지하므로 완료 행 정리만으로 절감 효과는 작다.
+- 30일 이상 갱신되지 않았고 Riot 계정·내전 후보·내전 참가자·기본 선호도에 연결되지 않은 소환사는 75,842명이다. 숙련도 종속 행은 실행계획상 1명당 약 56행으로 약 425만 행으로 추정되지만, 정확 집계는 60초 제한을 넘겨 운영 부하 방지를 위해 중단했다.
+- stale 소환사 cache를 삭제하면 숙련도·랭크·`summoner_matches`가 cascade 삭제되고 quick search 후보와 과거 전적 연결이 사라진다. 현재 조회 경로는 DB에 소환사 행이 존재하면 자동 재갱신하지 않으므로, freshness 기반 lazy refresh를 먼저 구현하지 않은 상태에서는 삭제하지 않는다.
+- 최신 패치는 16.17이며 최근 8개 패치(16.17~16.10)보다 오래된 경기는 46,662건, 참가자는 475,380건이다. 전체 경기의 약 5.3%라 raw 경기 계열 테이블에서 약 1.5~2GB의 InnoDB 내부 재사용 공간을 만들 것으로 추정한다.
+- 현재 챔피언·메타 통계는 최근 3개 패치만 사용하지만 일반 전적 API는 기간 제한 없이 과거 페이지 조회를 지원한다. 따라서 8개 패치 이전 raw 경기 삭제는 통계에는 영향이 없으나 사용자 과거 전적에는 영향이 있어 archive 또는 제품 보존 기간 확정이 선행되어야 한다.
+- `masteries`에는 약 6.2GB, `match_participant_perk_styles`에는 약 1.37GB의 `data_free`가 있으나 일반 `DELETE`로는 OS 디스크에 반환되지 않는다. 현재 여유 공간으로 대형 `OPTIMIZE TABLE`/rebuild를 실행하는 것은 안전하지 않다.
+
+### 2026-09-01 14:38 - 긴급 공간 정리 1차
+
+- 사용자 승인 범위를 Docker 미사용 build cache와 24시간보다 오래된 MySQL binlog로 제한했다. dangling image, volume, journal, DB table·row는 정리하지 않았다.
+- 실행 전 파일시스템은 129,317,355,520 bytes 사용, 8,041,885,696 bytes 여유, 사용률 95%였다.
+- 실행 중인 image/container/volume에 영향이 없는 `docker builder prune --all --force`로 BuildKit cache 103개를 제거했다. Docker가 보고한 논리적 cache 크기는 6.346GB였지만 현재 image와 공유되는 layer가 있어 전부가 물리적 추가 여유 공간으로 환산되지는 않았다.
+- `performance_schema.replication_connection_status`에서 replica channel 0개를 재확인한 뒤 `binlog_expire_logs_seconds`를 259,200초(72시간)에서 86,400초(24시간)로 `SET PERSIST`했다.
+- 24시간보다 오래된 `binlog.000043`~`binlog.000046`을 purge하고 새 active log로 rotate했다. `binlog.000047` 이후 파일은 유지했다.
+- 실행 후 파일시스템은 122,393,636,864 bytes 사용, 14,965,604,352 bytes 여유, 사용률 90%다. 실제 회수량은 6,923,718,656 bytes, 약 6.45GiB다.
+- BuildKit cache는 0B가 됐고 다음 첫 image build는 전체 layer를 다시 생성하므로 평소보다 느려진다. 이후 build에 따라 cache는 다시 증가하므로 장기적으로 7일 이상 된 미사용 cache만 주기적으로 제거하는 정책이 필요하다.
+- backend와 replay analyzer 모두 healthy이며 backend 루트 API가 정상 응답한다.
+
+### 2026-09-01 15:52 - 상위 디스크 사용 도메인 재측정
+
+- 사용자 승인에 따라 backend만 중지하고 replay analyzer와 MySQL은 유지한 상태에서 집계했다.
+- Docker overlay를 루트 `du`로 반복 순회하지 않고 MySQL tablespace, binlog, Docker logical storage, OS·사용자 디렉터리를 서로 겹치지 않는 도메인으로 분리했다.
+- 루트 파일시스템은 137,359,241,216 bytes 중 108,145,954,816 bytes 사용, 29,213,286,400 bytes 여유, 사용률 79%다. 앞서 실행한 Docker cache prune의 비동기 physical GC가 완료되면서 14:38 측정보다 여유 공간이 추가 증가했다.
+- MySQL table 크기는 `data_length + index_length + data_free`로 산정해 테이블 내부 재사용 가능 공간까지 해당 tablespace의 물리 추정치에 포함했다.
+- 상위 도메인은 숙련도 24.88GiB, 경기 참가자 core 10.88GiB, binlog 8.73GiB, 룬 선택 7.89GiB, 룬 스타일 6.55GiB 순이다.
+- 원격 개발 도구는 VS Code Server·Claude·Codex를 합쳐 3.34GiB, 기타 사용자 런타임·패키지 cache는 약 3.21GiB로 묶었다. `/home/ec2-user/workspace`는 별도 0.67GiB다.
+- 측정 중 발견된 backend 오류 `missing destination name match_participant_fk`는 `SELECT m.*, mp.*, mpd.*`의 실제 unqualified column과 `MatchParticipantExtraMXDAO`의 잘못된 `db:"mpd.match_participant_fk"` tag 불일치가 원인이다. 이 조사에서는 코드를 변경하거나 backend를 재기동하지 않았다.
+
+### 2026-09-01 16:10 - `masteries` 물리 구조 분석
+
+- 운영 `masteries`는 약 35,791,127행이며 전체 tablespace 물리 추정치는 24.88GiB다.
+- clustered `PRIMARY(puuid, champion_id)`는 683,383 page, 10.43GiB로 전체의 41.92%다. 이 중 leaf는 591,928 page, 9.03GiB다.
+- secondary covering index `(champion_id, champion_points DESC, champion_level)`는 568,383 page, 8.67GiB로 전체의 34.86%다. 이 중 leaf는 492,005 page, 7.51GiB다.
+- `data_free`는 5.78GiB로 전체의 23.22%다. 이는 InnoDB 내부 재사용 공간이며 table rebuild 전에는 OS에 반환되지 않는다.
+- 10만 행 표본에서 PUUID는 전부 78 bytes였고 `summoner_fk`는 95.36%가 NULL이었다. nullable bitmap을 포함한 논리 column payload는 평균 약 123.37 bytes/row로 추정된다.
+- clustered row 논리 payload 중 PUUID는 길이 prefix를 포함해 약 80 bytes, 64.84%다. 각 BIGINT 계열은 8 bytes, INT 계열은 4 bytes, DATETIME은 5 bytes, TINYINT는 1 byte다.
+- 실제 primary leaf는 약 270.97 bytes/row, 전체 primary는 약 312.83 bytes/row다. 논리 payload와 차이는 InnoDB record/MVCC/page directory overhead 및 랜덤 PK 삽입에 따른 page fill 저하다.
+- InnoDB secondary index는 PK를 row locator로 자동 포함한다. covering index의 논리 key 약 96 bytes 중 PUUID PK suffix가 약 80 bytes, 83.33%를 차지한다. 실제 secondary leaf는 약 225.22 bytes/row, 전체 secondary는 약 260.19 bytes/row다.
+- `summoner_fk` 백필과 숫자 PK 전환이 완료되면 long PUUID를 clustered/secondary key에서 제거할 수 있어 구조적으로 가장 큰 절감 효과가 예상된다. 현재는 95.36%가 NULL이고 Task #64가 미완료라 전환할 수 없다.
+
+## 조사 결과
+
+### 즉시 회수 후보
+
+| 우선순위 | 후보 | 예상 회수 | 영향·조건 |
+|---:|---|---:|---|
+| 1 | Docker BuildKit cache prune | 약 6.35GB | 다음 이미지 빌드가 느려진다. 볼륨은 절대 prune하지 않는다. Docker daemon 전역 범위라 사용자 승인 필요 |
+| 2 | binlog 보존 72h → 24h 및 만료분 purge | 현재 약 4GB, 이후 상한 감소 | replica는 없지만 PITR 보존 기간이 24시간으로 줄어든다. 사용자 승인 필요 |
+| 3 | dangling image prune | BuildKit과 중복을 제외한 수백 MB 수준 | 실행 중 container와 volume에는 영향 없음. daemon 전역 범위라 사용자 승인 필요 |
+| 4 | `summoner_matches_legacy_20260820` drop | 약 304MB | 현재 테이블에 legacy 전 행 존재. 마이그레이션 롤백 백업 상실 승인 필요 |
+| 5 | systemd journal 보존 축소 | 최대 약 607MB 중 일부 | 서버 전체 로그 이력이 줄어든다. teamgg 외 로그가 포함될 수 있어 기본 제외 |
+
+### DB 보존 후보
+
+| 후보 | 예상 절감 성격 | 선행 조건 |
+|---|---|---|
+| 8개 패치 이전 raw 경기 | 약 1.5~2GB 내부 재사용 공간 | S3 압축 archive·manifest·checksum, 과거 전적 제품 정책, 자식→부모 bounded delete |
+| 30일 이상 비연동 stale 소환사 cache | 숙련도 약 425만 행을 포함해 약 2~3GB 내부 재사용 공간 추정 | 조회 시 freshness 기반 lazy refresh, 보호 관계 검증, archive, 통계 dirty 반영 |
+| DataExplorer 완료 job | 수십 MB 이하 추정 | 기존 cleanup 활성화. processing state와 pending/processing/failed 유지 |
+| 3개 패치보다 오래된 raw 경기 | raw 경기 계열의 약 37.5%, 약 12GB 내부 재사용 가능 추정 | 통계에는 불필요하지만 일반 과거 전적 손실이 커서 기본 정책으로 권장하지 않음 |
+
+### 실제 OS 공간 반환 조건
+
+- Docker cache/image prune, binlog purge, legacy table drop은 즉시 파일시스템 여유 공간을 늘린다.
+- InnoDB 행 `DELETE`는 우선 테이블 내부 빈 페이지를 만들며 보통 `.ibd` 파일을 줄이지 않는다.
+- 장기적으로 patch/date partition을 도입해 `DROP PARTITION`으로 공간을 반환하거나, 충분한 임시 공간을 확보한 뒤 테이블별 online rebuild/`OPTIMIZE TABLE`을 해야 한다.
+- Task #64 숫자 키 전환과 #65 룬 평탄화를 진행할 때 새 테이블을 partitioned/compact 구조로 만들고 검증 후 원자적으로 전환하는 방식이 중복 rebuild를 줄인다.
+
+### 권장 실행 순서
+
+1. 사용자 승인 후 Docker build cache와 dangling image만 정리해 약 6GB 이상의 긴급 여유를 확보한다.
+2. PITR 24시간 정책을 승인받아 binlog 보존 기간을 줄이고 만료분만 purge한다.
+3. legacy backup 제거 여부를 별도로 승인받아 약 304MB를 회수한다.
+4. 8개 패치 hot retention + S3 압축 archive 정책을 구현한다. archive 검증 전에는 원본을 삭제하지 않는다.
+5. stale 소환사 lazy refresh와 bounded cache eviction을 구현한다.
+6. 충분한 여유 공간을 확보한 뒤 partition/compact schema로 전환해 InnoDB 내부 free space를 OS에 반환한다.
+
+## 최종 정리
+
+완료 후 확정 정책, 구현 내용, 삭제·아카이브 범위, 전후 지표와 운영 검증을 정리한다.

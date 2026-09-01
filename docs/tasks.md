@@ -17,21 +17,28 @@
 - `추천 작업 순서`에는 미완료 작업 중 다음에 진행할 작업을 의존성·운영 위험도·효과를 기준으로 최대 20개까지 나열하며, 작업 추가 및 상태·의존성 변경 시 함께 갱신합니다.
 - 세 앱의 신규 작업과 상태 변경은 이 문서에서만 관리합니다.
 - 각 작업의 상세 진행 기록은 `docs/tasks/{3자리 Index}.md`에서 관리합니다. 장기 작업은 진행 중에도 주요 변경·판단·검증 결과를 갱신하고, 완료 시 최종 결과를 정리합니다.
+- Task 상세 문서는 상태·목적·완료 조건·현재 결과·다음 단계가 한눈에 보이도록 표와 짧은 목록 중심으로 유지합니다. 긴 시간순 로그와 시행착오 전체 기록은 필요할 때 `docs/reports/`로 분리합니다.
 
 ## 추천 작업 순서
 
-`#66, #64, #65, #42, #51, #50, #52, #49, #44, #45, #46, #47, #48`
+`#66, #73, #74, #70, #71, #72, #65, #75, #42, #51, #50, #52, #49, #44, #45, #46, #47, #48`
 
 ## 작업 목록
 
 | Index | Tag | Status | Date | Dependencies | Summary | Description |
 |---:|---|---|---|---|---|---|
+| 75 | backend | 🔴 TODO | 2026-09-02 02:41 | #65, #72, #74 | Legacy 문자열 키 제거 | 숫자 관계 전환과 룬 평탄화가 안정화된 뒤 중복 문자열 FK·인덱스·호환 trigger를 단계적으로 제거한다. 백업·rollback 승인, legacy 의존성 0건, 운영 회귀와 디스크 효과 검증을 완료 조건으로 한다. |
+| 74 | backend | 🔴 TODO | 2026-09-02 02:41 | #73 | Legacy 숙련도 제거 | 기존 `masteries`를 행 수·checksum·복원 절차가 검증된 형태로 백업한 뒤 사용자 승인하에 제거해 약 20~25GiB의 OS 공간을 회수한다. |
+| 73 | backend | 🔴 TODO | 2026-09-02 02:41 | #64 | 숙련도 numeric 직접 쓰기 | 숙련도 쓰기 원본을 `masteries_numeric_v2`로 전환하고 관찰 기간 동안 정합성, rollback 경로, Riot 갱신·DataExplorer·통계 회귀를 검증한다. |
+| 72 | backend | 🔴 TODO | 2026-09-02 02:41 | #71 | 숫자 관계 읽기 전환 | 백필된 관계에 필수 숫자 인덱스·FK를 적용하고 API·DataExplorer·통계를 숫자 JOIN으로 전환한다. 결과 일치, EXPLAIN·성능, rollback과 운영 회귀를 검증한다. |
+| 71 | backend | 🔴 TODO | 2026-09-02 02:41 | #70 | 하위 관계 숫자 키 백필 | Participant를 참조하는 룬·스탯·밴·팀 등 하위 테이블의 숫자 FK를 제한 배치로 채우고 NULL·고아 참조 0건과 재실행 안전성을 검증한다. |
+| 70 | backend | 🔴 TODO | 2026-09-02 02:41 | #64, #74 | Participant 숫자 키 백필 | `match_participants` 전체의 participant PK, match FK, summoner FK를 재시작 가능한 제한 배치로 완료한다. 정합성, 처리량·binlog·디스크 증가량과 12GiB 안전선을 검증한다. |
 | 69 | backend | 🟢 DONE | 2026-08-21 | #67 | DB 용량 임계값 단위 지원 | `DATA_EXPLORER_ALERT_DATABASE_BYTES`가 기존 정수 바이트 값과 함께 `5G`, `200M`, `1.5TB` 같은 사람이 읽기 쉬운 1024 기반 용량 단위를 지원하도록 파서·테스트·운영 문서를 개선했다. 잘못된 값과 범위 초과 값은 안전하게 기본값으로 복귀하며, 단위 테스트와 백엔드 전체 테스트·빌드를 통과했다. |
 | 68 | backend | 🟢 DONE | 2026-08-23 17:04 | #67 | 관리자 운영 대시보드 | 별도 Go 관리자 API 서버와 기존 team.gg 프론트엔드의 `/admin` 화면을 구현했다. 관리자 서버에는 DB 접속정보·JWT 서명키·Docker socket을 제공하지 않고 별도 공유 비밀키로 제한된 백엔드 내부 API만 호출하게 했으며, 기존 로그인 토큰+DB 역할 또는 초기 bootstrap allowlist를 함께 검증한다. 서비스 상태, DataExplorer 큐·예산·DB/증가량, 리플레이 분석, 통계 스냅샷, 마이그레이션, 운영 이벤트를 범위 제한 조회하고 감사 로그·재귀 민감정보 마스킹을 적용했다. Compose·환경변수 예시·배포/아키텍처 문서를 추가했다. 백엔드 전체 테스트/빌드, 관리자 서버 테스트/Windows 및 Linux 정적 빌드, 프론트 프로덕션 빌드, 예제 환경파일 기반 Compose config와 `git diff --check`를 통과했다. Docker 데몬이 꺼져 있어 이미지 빌드 실행은 불가했으나 동일 Linux 빌드 명령은 검증했다. |
 | 67 | backend | 🟢 DONE | 2026-08-21 | — | DataExplorer 메트릭·알림 | DataExplorer에 5분 기본 저빈도 운영 메트릭 워커를 추가했다. 대규모 테이블을 전체 스캔하지 않고 `information_schema` 추정 행 수와 일별 DB 기준선으로 소환사·경기·숙련도 순증가량을 계산하며, 큐·일일 예산·DB 용량·임시 테이블 상태를 parseable `key=value` 로그로 노출한다. 환경변수 임계치의 최초 발생·정상화 알림, 일별 기준선 마이그레이션, 운영 예산 가이드와 단위 테스트를 추가했고 전체 Go 테스트·빌드를 통과했다. 실제 DB 마이그레이션은 실행하지 않았다. |
-| 66 | backend | 🟡 WIP | 2026-09-01 15:52 | #58, #59 | 데이터 보존·아카이브 정책 | 운영 디스크 사용률 95%를 조사하고 BuildKit cache 정리와 binlog 24시간 보존 전환·만료분 purge를 수행했다. 비동기 Docker GC 완료 후 현재 여유 27.2GiB·사용률 79%이며 상위 20개 사용 도메인을 재측정했다. 8개 패치 hot retention·S3 압축 archive·bounded cleanup·stale cache lazy refresh 구현이 남아 있다. 상세 진행은 `docs/tasks/066.md`에서 관리한다. |
-| 65 | backend | 🔴 TODO | 2026-08-20 | #60, #64 | 룬 스키마 평탄화 | 룬 데이터를 참가자당 고정 컬럼 또는 단일 `participant_perks` 행으로 평탄화하는 스키마를 설계하고, 이중 쓰기·백필·검증·읽기 전환·구 테이블 제거 순서의 무중단 마이그레이션을 구현한다. |
-| 64 | backend | 🟡 WIP | 2026-09-02 02:35 | #60 | 숫자 PK·FK 스키마 v2 | 숙련도 43,275,694행 compact shadow copy·checksum·covering index·legacy 쓰기 동기화와 직접 SQL 성능 비교를 완료하고 운영 `numeric_v2` 읽기로 전환했다. backend healthy, 실제 소환사·champion·meta-summary API 200과 관련 오류 부재를 확인했다. 소환사·경기 부모 키는 완료됐지만 participant 전체 및 나머지 하위 관계의 숫자 PK/FK 백필·정합성·인덱스/FK 전환이 남아 WIP다. 세부 기록은 `docs/tasks/064.md`를 참조한다. |
+| 66 | backend | 🟡 WIP | 2026-09-02 02:41 | #58, #59 | 데이터 보존·아카이브 정책 | BuildKit cache와 만료 binlog를 정리하고 binlog 보존을 24시간으로 조정했다. 숙련도 shadow 전환 후 현재 디스크는 약 20GiB 여유·85% 사용이며, legacy 숙련도 제거와 패치별 archive·bounded cleanup·stale cache 정책 구현이 남아 있다. |
+| 65 | backend | 🔴 TODO | 2026-09-02 02:41 | #72 | 룬 스키마 평탄화 | 숫자 participant 관계를 기반으로 룬 데이터를 참가자당 고정 컬럼 또는 단일 `participant_perks` 행으로 평탄화하고 이중 쓰기·백필·검증·읽기 전환을 수행한다. |
+| 64 | backend | 🟢 DONE | 2026-09-02 02:35 | #60 | 숫자 키 기반·숙련도 읽기 전환 | 숫자 identity 기반과 소환사·경기 부모 키를 구축하고, 숙련도 43,275,694행 compact shadow·checksum·동기화 trigger·성능 비교를 거쳐 운영 `numeric_v2` 읽기로 전환했다. backend healthy와 실제 API 200을 확인했다. 남은 participant·하위 관계·legacy 제거는 #70~#75로 분리했다. |
 | 63 | backend | 🟢 DONE | 2026-08-31 14:59 | — | 미사용 인덱스 정리 | 운영 MySQL의 인덱스 크기·`performance_schema`·statement digest·코드·후보 제외 EXPLAIN을 교차검증해 약 8.1GiB의 제거 후보 4개를 확정하고 `20260830_004`로 제거했다. 운영 마이그레이션은 1.519초, `dirty=0`으로 완료됐고 대상 인덱스 4개 부재와 대체 숙련도 covering index를 확인했다. 재기동 후 backend healthy, champion·meta-summary API 200, 관련 오류 없음까지 검증했다. 상세 결과는 `docs/reports/2026-08-30-index-usage-review.md`를 참조한다. |
 | 62 | backend | 🟢 DONE | 2026-08-31 16:09 | — | 챔피언 통계 증분 집계 | 단일 대형 staging INSERT를 경기 10개 단위 증분 source, 버전별 cursor, processed-match 마커, 늦게 유입된 경기 fallback, work limit 구조로 교체하고 `20260830_003`을 운영 적용했다. 집중 구간에서 58,150경기를 약 50분(평균 약 1,163경기/분) 동안 오류 없이 처리했고 background loop가 저장된 cursor부터 이어받았다. 운영 재확인 결과 대상 full version 6개가 모두 `completed=1`이며 총 500,470경기의 초기 source 백필, base·position·meta·counter 집계와 새 snapshot 생성이 완료됐다. champion·meta-summary API가 동일한 새 `updatedAt`을 반환하고 fresh snapshot 재실행 skip까지 확인해 DONE 처리했다. 상세 결과는 `docs/reports/2026-08-30-statistics-production-verification.md`를 참조한다. |
 | 61 | backend | 🟢 DONE | 2026-08-30 11:38 | — | 숙련도 통계 증분 집계 | 숙련도 통계를 커버링 인덱스, dirty-champion queue·변경 트리거, materialized aggregate와 챔피언별 Top 30 조회로 전환해 운영 배포했다. 마이그레이션 12개 clean, 신규 테이블·트리거·인덱스, covering-index 및 filesort 없는 Top 30 계획을 확인했다. 첫 236개 갱신은 1분 25초, 후속 184개 갱신은 1분 31초였고 비챔피언 `600xx` ID를 안전하게 제외한 뒤 1.03MB snapshot 저장에 성공했다. 활성 수집 이후 변경분은 dirty queue로 추적됨을 확인했다. 상세 결과는 `docs/reports/2026-08-30-statistics-production-verification.md`를 참조한다. |
@@ -98,7 +105,7 @@
 
 ## 검증 기록
 
-- 2026-09-02 02:35 — Task 64 숙련도 하위 단계를 운영 `numeric_v2` 읽기로 전환했다. revision `6273dca`, backend healthy와 `Mastery read source: numeric_v2`를 확인했고 루트·champion·meta-summary 및 실제 `션 쿠#션 쿠` 소환사 API가 모두 HTTP 200을 반환했다. 직접 SQL 비교에서 결과가 전부 일치했으며 소환사 lookup p50은 0.959→0.774ms, 챔피언 aggregate는 147.667→112.564ms로 개선됐다. Top ranker는 조인 병목 수정 후 3.16초에서 1.943ms로 정상화됐다. 숙련도 전환은 완료됐지만 participant와 나머지 하위 관계 숫자 키 이관이 남아 Task 64는 WIP로 유지한다.
+- 2026-09-02 02:41 — Task 64의 범위를 숫자 identity 기반, 소환사·경기 부모 키, 숙련도 numeric 읽기 전환까지로 확정해 DONE 처리했다. 운영 `numeric_v2` 전환, 결과 일치, 직접 SQL 성능, backend healthy와 실제 API 200을 검증했다. Participant·하위 관계·숫자 FK/읽기 전환·legacy 제거는 독립적인 완료 조건을 가진 #70~#75로 분리했다.
 
 - 2026-08-31 16:09 — Task 62 운영 상태를 재확인했다. `champion_detail_statistics_progress`의 대상 full version 6개가 모두 `completed=1`이고 처리 경기 합계는 500,470건이다. 새 champion·meta-summary snapshot의 `updatedAt`은 `2026-08-30T18:30:56.081618598Z`로 일치했으며 두 API 모두 이를 정상 제공한다. 현재 loop가 fresh shared snapshot을 감지해 다음 만료까지 skip하는 것도 확인했다. 남아 있던 전체 초기 백필, 최종 집계, snapshot/API 갱신, 재실행 skip 완료 조건을 충족해 Task 62를 DONE 처리했다.
 
