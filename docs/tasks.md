@@ -16,10 +16,11 @@
 - `Summary`에는 작업을 한눈에 식별할 수 있는 짧은 제목을, `Description`에는 상세 범위와 구현·검증 결과를 기록합니다.
 - `추천 작업 순서`에는 미완료 작업 중 다음에 진행할 작업을 의존성·운영 위험도·효과를 기준으로 최대 20개까지 나열하며, 작업 추가 및 상태·의존성 변경 시 함께 갱신합니다.
 - 세 앱의 신규 작업과 상태 변경은 이 문서에서만 관리합니다.
+- 각 작업의 상세 진행 기록은 `docs/tasks/{3자리 Index}.md`에서 관리합니다. 장기 작업은 진행 중에도 주요 변경·판단·검증 결과를 갱신하고, 완료 시 최종 결과를 정리합니다.
 
 ## 추천 작업 순서
 
-`#62, #64, #65, #66, #42, #51, #50, #52, #49, #44, #45, #46, #47, #48`
+`#66, #64, #65, #42, #51, #50, #52, #49, #44, #45, #46, #47, #48`
 
 ## 작업 목록
 
@@ -28,11 +29,11 @@
 | 69 | backend | 🟢 DONE | 2026-08-21 | #67 | DB 용량 임계값 단위 지원 | `DATA_EXPLORER_ALERT_DATABASE_BYTES`가 기존 정수 바이트 값과 함께 `5G`, `200M`, `1.5TB` 같은 사람이 읽기 쉬운 1024 기반 용량 단위를 지원하도록 파서·테스트·운영 문서를 개선했다. 잘못된 값과 범위 초과 값은 안전하게 기본값으로 복귀하며, 단위 테스트와 백엔드 전체 테스트·빌드를 통과했다. |
 | 68 | backend | 🟢 DONE | 2026-08-23 17:04 | #67 | 관리자 운영 대시보드 | 별도 Go 관리자 API 서버와 기존 team.gg 프론트엔드의 `/admin` 화면을 구현했다. 관리자 서버에는 DB 접속정보·JWT 서명키·Docker socket을 제공하지 않고 별도 공유 비밀키로 제한된 백엔드 내부 API만 호출하게 했으며, 기존 로그인 토큰+DB 역할 또는 초기 bootstrap allowlist를 함께 검증한다. 서비스 상태, DataExplorer 큐·예산·DB/증가량, 리플레이 분석, 통계 스냅샷, 마이그레이션, 운영 이벤트를 범위 제한 조회하고 감사 로그·재귀 민감정보 마스킹을 적용했다. Compose·환경변수 예시·배포/아키텍처 문서를 추가했다. 백엔드 전체 테스트/빌드, 관리자 서버 테스트/Windows 및 Linux 정적 빌드, 프론트 프로덕션 빌드, 예제 환경파일 기반 Compose config와 `git diff --check`를 통과했다. Docker 데몬이 꺼져 있어 이미지 빌드 실행은 불가했으나 동일 Linux 빌드 명령은 검증했다. |
 | 67 | backend | 🟢 DONE | 2026-08-21 | — | DataExplorer 메트릭·알림 | DataExplorer에 5분 기본 저빈도 운영 메트릭 워커를 추가했다. 대규모 테이블을 전체 스캔하지 않고 `information_schema` 추정 행 수와 일별 DB 기준선으로 소환사·경기·숙련도 순증가량을 계산하며, 큐·일일 예산·DB 용량·임시 테이블 상태를 parseable `key=value` 로그로 노출한다. 환경변수 임계치의 최초 발생·정상화 알림, 일별 기준선 마이그레이션, 운영 예산 가이드와 단위 테스트를 추가했고 전체 Go 테스트·빌드를 통과했다. 실제 DB 마이그레이션은 실행하지 않았다. |
-| 66 | backend | 🔴 TODO | 2026-08-20 | #58, #59 | 데이터 보존·아카이브 정책 | 경기·참가자·숙련도 데이터의 보존 기간과 아카이브 정책을 설계하고, 작은 배치·재시작 가능 cursor·실행 제한·dry-run을 갖춘 정리 작업을 구현한다. |
+| 66 | backend | 🟡 WIP | 2026-09-01 15:52 | #58, #59 | 데이터 보존·아카이브 정책 | 운영 디스크 사용률 95%를 조사하고 BuildKit cache 정리와 binlog 24시간 보존 전환·만료분 purge를 수행했다. 비동기 Docker GC 완료 후 현재 여유 27.2GiB·사용률 79%이며 상위 20개 사용 도메인을 재측정했다. 8개 패치 hot retention·S3 압축 archive·bounded cleanup·stale cache lazy refresh 구현이 남아 있다. 상세 진행은 `docs/tasks/066.md`에서 관리한다. |
 | 65 | backend | 🔴 TODO | 2026-08-20 | #60, #64 | 룬 스키마 평탄화 | 룬 데이터를 참가자당 고정 컬럼 또는 단일 `participant_perks` 행으로 평탄화하는 스키마를 설계하고, 이중 쓰기·백필·검증·읽기 전환·구 테이블 제거 순서의 무중단 마이그레이션을 구현한다. |
-| 64 | backend | 🟡 WIP | 2026-08-30 22:51 | #60 | 숫자 PK·FK 스키마 v2 | 기존 문자열 API·PK를 유지한 채 `summoners`, `matches`, `match_participants`에 nullable 숫자 키, 전용 매핑·진행 테이블, 신규 쓰기 동기화 트리거를 추가하는 `20260830_005` foundation을 구현했다. 일반 기동과 분리된 `backfill-numeric-keys` 명령은 소환사→경기→참가자 순서로 제한된 keyset 배치를 실행하며 cursor·누적량을 저장하고 부모 누락을 거부한다. 단위 테스트, 백엔드 전체 테스트·빌드와 격리 MySQL 8의 기존 행 백필·신규 쓰기·부모 무결성·재실행 검증을 통과했다. #62 종료 후 운영 foundation 적용과 부모 백필을 검증한 다음 하위 테이블 숫자 FK 이관·읽기/PK/FK 전환·레거시 문자열 FK 제거가 남아 WIP를 유지한다. 세부 계획은 `docs/plans/numeric-key-schema-v2.md`를 참조한다. |
+| 64 | backend | 🟡 WIP | 2026-09-02 02:35 | #60 | 숫자 PK·FK 스키마 v2 | 숙련도 43,275,694행 compact shadow copy·checksum·covering index·legacy 쓰기 동기화와 직접 SQL 성능 비교를 완료하고 운영 `numeric_v2` 읽기로 전환했다. backend healthy, 실제 소환사·champion·meta-summary API 200과 관련 오류 부재를 확인했다. 소환사·경기 부모 키는 완료됐지만 participant 전체 및 나머지 하위 관계의 숫자 PK/FK 백필·정합성·인덱스/FK 전환이 남아 WIP다. 세부 기록은 `docs/tasks/064.md`를 참조한다. |
 | 63 | backend | 🟢 DONE | 2026-08-31 14:59 | — | 미사용 인덱스 정리 | 운영 MySQL의 인덱스 크기·`performance_schema`·statement digest·코드·후보 제외 EXPLAIN을 교차검증해 약 8.1GiB의 제거 후보 4개를 확정하고 `20260830_004`로 제거했다. 운영 마이그레이션은 1.519초, `dirty=0`으로 완료됐고 대상 인덱스 4개 부재와 대체 숙련도 covering index를 확인했다. 재기동 후 backend healthy, champion·meta-summary API 200, 관련 오류 없음까지 검증했다. 상세 결과는 `docs/reports/2026-08-30-index-usage-review.md`를 참조한다. |
-| 62 | backend | 🟡 WIP | 2026-08-30 16:48 | — | 챔피언 통계 증분 집계 | 단일 대형 staging INSERT를 경기 10개 단위 증분 source, 버전별 cursor, processed-match 마커, 늦게 유입된 경기 fallback, work limit 구조로 교체하고 `20260830_003`을 운영 적용했다. 일반 구간은 대표 695~777경기/분, API·DataExplorer를 중지한 집중 구간은 58,150경기/약 50분(평균 약 1,163경기/분)을 처리했으며 deadlock·중복 키·임시 파일·수집 오류는 없었다. 점검 창 종료 후 backend·replay health와 공개 API 200을 확인했고 background loop가 저장된 cursor부터 이어서 처리한다. 전체 초기 백필, base·position·meta·counter 완료 시간, 새 snapshot/API 갱신 및 재실행 skip 검증이 남아 WIP를 유지한다. 상세 결과는 `docs/reports/2026-08-30-statistics-production-verification.md`를 참조한다. |
+| 62 | backend | 🟢 DONE | 2026-08-31 16:09 | — | 챔피언 통계 증분 집계 | 단일 대형 staging INSERT를 경기 10개 단위 증분 source, 버전별 cursor, processed-match 마커, 늦게 유입된 경기 fallback, work limit 구조로 교체하고 `20260830_003`을 운영 적용했다. 집중 구간에서 58,150경기를 약 50분(평균 약 1,163경기/분) 동안 오류 없이 처리했고 background loop가 저장된 cursor부터 이어받았다. 운영 재확인 결과 대상 full version 6개가 모두 `completed=1`이며 총 500,470경기의 초기 source 백필, base·position·meta·counter 집계와 새 snapshot 생성이 완료됐다. champion·meta-summary API가 동일한 새 `updatedAt`을 반환하고 fresh snapshot 재실행 skip까지 확인해 DONE 처리했다. 상세 결과는 `docs/reports/2026-08-30-statistics-production-verification.md`를 참조한다. |
 | 61 | backend | 🟢 DONE | 2026-08-30 11:38 | — | 숙련도 통계 증분 집계 | 숙련도 통계를 커버링 인덱스, dirty-champion queue·변경 트리거, materialized aggregate와 챔피언별 Top 30 조회로 전환해 운영 배포했다. 마이그레이션 12개 clean, 신규 테이블·트리거·인덱스, covering-index 및 filesort 없는 Top 30 계획을 확인했다. 첫 236개 갱신은 1분 25초, 후속 184개 갱신은 1분 31초였고 비챔피언 `600xx` ID를 안전하게 제외한 뒤 1.03MB snapshot 저장에 성공했다. 활성 수집 이후 변경분은 dirty queue로 추적됨을 확인했다. 상세 결과는 `docs/reports/2026-08-30-statistics-production-verification.md`를 참조한다. |
 | 60 | backend | 🟢 DONE | 2026-08-21 | — | 스키마 마이그레이션 시스템 | 적용된 마이그레이션을 기록하는 스키마 버전 테이블과 순차 실행기를 도입했다. 시작 시 체크섬·dirty 상태·필수 테이블/컬럼/인덱스 드리프트를 검증하고, 명시적 `migrate` 명령에서 누락된 `summoner_matches(puuid, match_id)` PK를 미러 트리거·재시작 가능한 keyset cursor·중복 제거·원자적 교체로 안전하게 적용한다. 전체 Go 테스트와 빌드를 통과했으며 실제 운영 DB에는 실행하지 않았다. |
 | 59 | backend | 🟢 DONE | 2026-08-20 | #58 | DataExplorer 재처리·정리 정책 | 소환사·경기별 `last_processed_at`/`next_eligible_at` 상태를 분리해 cooldown 중 재등록을 차단하고, 기존 완료 job을 PK cursor로 재시작 가능하게 소량 백필한다. 삭제는 기본 비활성 opt-in이며 상태가 보존된 `done` job만 보존 기간 후 제한된 배치로 정리한다. `match_sources`도 별도 복합 PK cursor로 스캔·삭제하고 pending/processing/failed 행은 보존한다. 환경변수 안전 경계, cursor 재시작·진행, bounded delete 테스트와 전체 Go 테스트·빌드를 통과했다. |
@@ -96,6 +97,12 @@
 | 1 | replay | 🟢 DONE | — | — | SSE CORS 헤더 수정 | Fastify 응답 생명주기를 우회하는 SSE 응답에도 허용된 CORS Origin 헤더를 추가했다. |
 
 ## 검증 기록
+
+- 2026-09-02 02:35 — Task 64 숙련도 하위 단계를 운영 `numeric_v2` 읽기로 전환했다. revision `6273dca`, backend healthy와 `Mastery read source: numeric_v2`를 확인했고 루트·champion·meta-summary 및 실제 `션 쿠#션 쿠` 소환사 API가 모두 HTTP 200을 반환했다. 직접 SQL 비교에서 결과가 전부 일치했으며 소환사 lookup p50은 0.959→0.774ms, 챔피언 aggregate는 147.667→112.564ms로 개선됐다. Top ranker는 조인 병목 수정 후 3.16초에서 1.943ms로 정상화됐다. 숙련도 전환은 완료됐지만 participant와 나머지 하위 관계 숫자 키 이관이 남아 Task 64는 WIP로 유지한다.
+
+- 2026-08-31 16:09 — Task 62 운영 상태를 재확인했다. `champion_detail_statistics_progress`의 대상 full version 6개가 모두 `completed=1`이고 처리 경기 합계는 500,470건이다. 새 champion·meta-summary snapshot의 `updatedAt`은 `2026-08-30T18:30:56.081618598Z`로 일치했으며 두 API 모두 이를 정상 제공한다. 현재 loop가 fresh shared snapshot을 감지해 다음 만료까지 skip하는 것도 확인했다. 남아 있던 전체 초기 백필, 최종 집계, snapshot/API 갱신, 재실행 skip 완료 조건을 충족해 Task 62를 DONE 처리했다.
+
+- 2026-08-31 16:03 — Task 64의 운영 foundation `20260830_005`와 호환성 보완 `20260831_006`을 적용했다. `006`은 33ms, `dirty=0`으로 완료됐으며 참가자 트리거가 기존 저장 순서에서도 match·summoner numeric identity를 선점하고 거부 `SIGNAL`을 사용하지 않음을 확인했다. 첫 배포에서 발견한 strict DAO scan 오류와 participant parent 오류를 수정한 뒤 영향받은 경기 작업 20건이 모두 자동 복구되어 `done`, `last_error=NULL`, 경기 및 참가자 저장 완료 상태가 됐다. 두 차례 제한 백필로 소환사 221,500건을 처리했고 cursor가 저장됐다. 종료 시 backend·replay healthy, 루트·champion·meta-summary API 정상, 관련 최근 오류 없음, `Threads_running=3`, `Innodb_row_lock_current_waits=0`, 루트 디스크 20GB 여유를 확인했다. 디스크 여유와 서비스 부하를 고려해 추가 연속 백필은 실행하지 않았으며 Task 64는 WIP로 유지한다.
 
 - 2026-08-31 14:59 — Task 63의 `20260830_004`을 운영 MySQL 8.0.45에 적용했다. 1.519초에 `dirty=0`으로 완료됐고 제거 대상 인덱스 4개가 모두 부재하며 `masteries_champion_points_level_covering_index(champion_id, champion_points, champion_level)`가 유지됨을 확인했다. backend 재기동 후 healthy, 루트 응답, champion·meta-summary API 200 및 최근 migration/deadlock/duplicate/temporary-file 오류 부재를 검증했다.
 
