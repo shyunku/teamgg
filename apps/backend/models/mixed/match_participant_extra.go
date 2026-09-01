@@ -98,7 +98,7 @@ type MatchParticipantExtraMXDAO struct {
 	//	Details
 	None1                          *string       `db:"mpd.match_participant_id" json:"none1"`
 	None2                          *string       `db:"mpd.match_id" json:"none2"`
-	DetailMatchParticipantFk       sql.NullInt64 `db:"mpd.match_participant_fk" json:"-"`
+	DetailMatchParticipantFk       sql.NullInt64 `db:"match_participant_fk" json:"-"`
 	DetailMatchFk                  sql.NullInt64 `db:"mpd.match_fk" json:"-"`
 	BaronKills                     int           `db:"baron_kills" json:"baronKills"`
 	BountyLevel                    int           `db:"bounty_level" json:"bountyLevel"`

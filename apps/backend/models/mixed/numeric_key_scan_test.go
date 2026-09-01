@@ -11,7 +11,8 @@ func TestMatchParticipantExtraAcceptsNumericKeyColumns(t *testing.T) {
 	nullInt64Type := reflect.TypeOf(sql.NullInt64{})
 	columns := []string{
 		"match_pk", "match_participant_pk", "match_fk", "summoner_fk",
-		"mpd.match_participant_fk", "mpd.match_fk",
+		// MySQL returns unqualified column labels for SELECT mpd.*.
+		"match_participant_fk",
 	}
 
 	for _, column := range columns {
