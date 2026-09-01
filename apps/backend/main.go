@@ -216,7 +216,10 @@ func main() {
 		lastProgressLog := time.Now()
 		options.Progress = func(progress migrations.DataRetentionResult) {
 			if progress.DeletedMatches%1000 == 0 || time.Since(lastProgressLog) >= 30*time.Second {
-				log.Infof("Data retention cleanup progress: deletedMatches=%d rows=%v", progress.DeletedMatches, progress.DeletedRows)
+				log.Infof(
+					"Data retention cleanup progress: deletedMatches=%d rows=%v deleteMs=%v",
+					progress.DeletedMatches, progress.DeletedRows, progress.DeleteDurationMs,
+				)
 				lastProgressLog = time.Now()
 			}
 		}

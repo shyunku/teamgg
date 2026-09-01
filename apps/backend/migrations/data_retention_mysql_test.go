@@ -87,7 +87,7 @@ func createDataRetentionFixture(t *testing.T, database *sqlx.DB) {
 	t.Helper()
 	statements := []string{
 		`CREATE TABLE matches (match_id VARCHAR(32) PRIMARY KEY, game_version VARCHAR(32) NOT NULL, KEY matches_game_version_index (game_version)) ENGINE=InnoDB`,
-		`CREATE TABLE match_participants (match_id VARCHAR(32), participant_id INT, match_participant_id VARCHAR(32) PRIMARY KEY) ENGINE=InnoDB`,
+		`CREATE TABLE match_participants (match_id VARCHAR(32), participant_id INT, match_participant_id VARCHAR(32) PRIMARY KEY, puuid VARCHAR(32)) ENGINE=InnoDB`,
 		`CREATE TABLE match_participant_details (match_participant_id VARCHAR(32) PRIMARY KEY, match_id VARCHAR(32)) ENGINE=InnoDB`,
 		`CREATE TABLE match_participant_perks (match_participant_id VARCHAR(32) PRIMARY KEY) ENGINE=InnoDB`,
 		`CREATE TABLE match_participant_perk_styles (match_participant_id VARCHAR(32), style_id VARCHAR(32) PRIMARY KEY) ENGINE=InnoDB`,
@@ -116,7 +116,7 @@ func createDataRetentionFixture(t *testing.T, database *sqlx.DB) {
 			args  []interface{}
 		}{
 			{`INSERT INTO matches VALUES (?, ?)`, []interface{}{matchID, patch}},
-			{`INSERT INTO match_participants VALUES (?, 1, ?)`, []interface{}{matchID, participantID}},
+			{`INSERT INTO match_participants VALUES (?, 1, ?, 'puuid')`, []interface{}{matchID, participantID}},
 			{`INSERT INTO match_participant_details VALUES (?, ?)`, []interface{}{participantID, matchID}},
 			{`INSERT INTO match_participant_perks VALUES (?)`, []interface{}{participantID}},
 			{`INSERT INTO match_participant_perk_styles VALUES (?, ?)`, []interface{}{participantID, styleID}},

@@ -34,15 +34,16 @@ type DataRetentionOptions struct {
 }
 
 type DataRetentionResult struct {
-	DryRun          bool             `json:"dryRun"`
-	RetainedPatches []string         `json:"retainedPatches"`
-	ExpiredVersions []string         `json:"expiredVersions"`
-	EligibleMatches int64            `json:"eligibleMatches"`
-	DeletedMatches  int64            `json:"deletedMatches"`
-	DeletedRows     map[string]int64 `json:"deletedRows,omitempty"`
-	Completed       bool             `json:"completed"`
-	Duration        time.Duration    `json:"-"`
-	DurationMillis  int64            `json:"durationMs"`
+	DryRun           bool             `json:"dryRun"`
+	RetainedPatches  []string         `json:"retainedPatches"`
+	ExpiredVersions  []string         `json:"expiredVersions"`
+	EligibleMatches  int64            `json:"eligibleMatches"`
+	DeletedMatches   int64            `json:"deletedMatches"`
+	DeletedRows      map[string]int64 `json:"deletedRows,omitempty"`
+	DeleteDurationMs map[string]int64 `json:"deleteDurationMs,omitempty"`
+	Completed        bool             `json:"completed"`
+	Duration         time.Duration    `json:"-"`
+	DurationMillis   int64            `json:"durationMs"`
 }
 
 func (result DataRetentionResult) String() string {
@@ -87,8 +88,21 @@ var retentionMatchDeleteStatements = []retentionDeleteStatement{
 			WHERE participant.match_id IN (?)`,
 	},
 	{
-		Name:  "match_participant_details",
-		Query: `DELETE FROM match_participant_details WHERE match_id IN (?)`,
+		Name: "match_participant_details",
+		Query: `DELETE detail_row
+			FROM match_participants participant
+			STRAIGHT_JOIN match_participant_details detail_row
+				ON detail_row.match_participant_id = participant.match_participant_id
+			WHERE participant.match_id IN (?)`,
+	},
+	{
+		Name: "summoner_matches",
+		Query: `DELETE summoner_match
+			FROM match_participants participant
+			STRAIGHT_JOIN summoner_matches summoner_match
+				ON summoner_match.puuid = participant.puuid
+			   AND summoner_match.match_id = participant.match_id
+			WHERE participant.match_id IN (?)`,
 	},
 	{
 		Name: "match_participant_numeric_keys",
@@ -111,10 +125,6 @@ var retentionMatchDeleteStatements = []retentionDeleteStatement{
 		Query: `DELETE FROM match_teams WHERE match_id IN (?)`,
 	},
 	{
-		Name:  "summoner_matches",
-		Query: `DELETE FROM summoner_matches WHERE match_id IN (?)`,
-	},
-	{
 		Name:  "data_explorer_match_sources",
 		Query: `DELETE FROM data_explorer_match_sources WHERE match_id IN (?)`,
 	},
@@ -127,8 +137,13 @@ var retentionMatchDeleteStatements = []retentionDeleteStatement{
 		Query: `DELETE FROM data_explorer_match_processing_state WHERE match_id IN (?)`,
 	},
 	{
-		Name:  "champion_detail_statistics_processed_matches",
-		Query: `DELETE FROM champion_detail_statistics_processed_matches WHERE match_id IN (?)`,
+		Name: "champion_detail_statistics_processed_matches",
+		Query: `DELETE processed_match
+			FROM matches match_row
+			STRAIGHT_JOIN champion_detail_statistics_processed_matches processed_match
+				ON processed_match.game_version = match_row.game_version
+			   AND processed_match.match_id = match_row.match_id
+			WHERE match_row.match_id IN (?)`,
 	},
 	{
 		Name:  "match_numeric_keys",
@@ -181,7 +196,9 @@ func retentionEnvDuration(key string, fallback, minimum, maximum time.Duration) 
 }
 
 func CleanupRetainedData(ctx context.Context, database *sqlx.DB, options DataRetentionOptions) (result DataRetentionResult, returnedErr error) {
-	result = DataRetentionResult{DryRun: options.DryRun, DeletedRows: make(map[string]int64)}
+	result = DataRetentionResult{
+		DryRun: options.DryRun, DeletedRows: make(map[string]int64), DeleteDurationMs: make(map[string]int64),
+	}
 	started := time.Now()
 	defer func() {
 		result.Duration = time.Since(started)
@@ -244,7 +261,7 @@ func CleanupRetainedData(ctx context.Context, database *sqlx.DB, options DataRet
 			cancel()
 			return result, txErr
 		}
-		batchRows, deleteErr := deleteRetentionMatchBatch(batchContext, tx, matchIDs)
+		batchRows, batchDurations, deleteErr := deleteRetentionMatchBatch(batchContext, tx, matchIDs)
 		if deleteErr != nil {
 			_ = tx.Rollback()
 			cancel()
@@ -257,6 +274,9 @@ func CleanupRetainedData(ctx context.Context, database *sqlx.DB, options DataRet
 		cancel()
 		for table, rows := range batchRows {
 			result.DeletedRows[table] += rows
+		}
+		for table, duration := range batchDurations {
+			result.DeleteDurationMs[table] += duration.Milliseconds()
 		}
 		result.DeletedMatches += int64(len(matchIDs))
 		if options.Progress != nil {
@@ -342,22 +362,25 @@ func selectRetentionMatchBatch(ctx context.Context, connection *sqlx.Conn, versi
 	return matchIDs, nil
 }
 
-func deleteRetentionMatchBatch(ctx context.Context, tx *sqlx.Tx, matchIDs []string) (map[string]int64, error) {
+func deleteRetentionMatchBatch(ctx context.Context, tx *sqlx.Tx, matchIDs []string) (map[string]int64, map[string]time.Duration, error) {
 	deleted := make(map[string]int64, len(retentionMatchDeleteStatements))
+	durations := make(map[string]time.Duration, len(retentionMatchDeleteStatements))
 	for _, statement := range retentionMatchDeleteStatements {
 		query, args, err := sqlx.In(statement.Query, matchIDs)
 		if err != nil {
-			return nil, fmt.Errorf("bind retention delete for %s: %w", statement.Name, err)
+			return nil, nil, fmt.Errorf("bind retention delete for %s: %w", statement.Name, err)
 		}
+		started := time.Now()
 		result, err := tx.ExecContext(ctx, tx.Rebind(query), args...)
+		durations[statement.Name] = time.Since(started)
 		if err != nil {
-			return nil, fmt.Errorf("delete retained rows from %s: %w", statement.Name, err)
+			return nil, nil, fmt.Errorf("delete retained rows from %s: %w", statement.Name, err)
 		}
 		rows, err := result.RowsAffected()
 		if err != nil {
-			return nil, fmt.Errorf("read retention delete result for %s: %w", statement.Name, err)
+			return nil, nil, fmt.Errorf("read retention delete result for %s: %w", statement.Name, err)
 		}
 		deleted[statement.Name] = rows
 	}
-	return deleted, nil
+	return deleted, durations, nil
 }
