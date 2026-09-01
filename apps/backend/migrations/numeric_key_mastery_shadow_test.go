@@ -88,7 +88,6 @@ func TestMasteryNumericShadowSchemaUsesCompactNumericKeys(t *testing.T) {
 	for _, expected := range []string{
 		"summoner_fk bigint unsigned not null",
 		"primary key (summoner_fk, champion_id)",
-		"(champion_id, champion_points desc, champion_level)",
 	} {
 		if !strings.Contains(tableDDL, expected) {
 			t.Fatalf("shadow DDL does not contain %q: %s", expected, tableDDL)
@@ -96,6 +95,9 @@ func TestMasteryNumericShadowSchemaUsesCompactNumericKeys(t *testing.T) {
 	}
 	if strings.Contains(tableDDL, "puuid") {
 		t.Fatalf("compact shadow table must not store PUUID: %s", tableDDL)
+	}
+	if strings.Contains(tableDDL, "masteries_numeric_champion_points_level_covering_index") {
+		t.Fatalf("covering index must be bulk-built only after the copy validates: %s", tableDDL)
 	}
 }
 

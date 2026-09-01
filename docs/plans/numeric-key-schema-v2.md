@@ -110,8 +110,9 @@ CREATE TABLE masteries_numeric_v2 (
 2. 기존 PK `(puuid, champion_id)` 순서로 제한된 keyset batch를 읽는다.
 3. 범위 SELECT에는 JOIN을 넣지 않는다. 선택된 batch의 고유 PUUID만 숫자 mapping index로 별도 조회한 뒤 500행 단위 `VALUES` bulk insert로 shadow에 저장한다.
 4. 실행 제한 시간이 끝나면 정상 종료하고 다음 실행에서 cursor 이후부터 재개한다.
-5. source/shadow 행 수, champion별 행 수·점수 합계, 전체 aggregate checksum, NULL/orphan을 비교한다.
-6. shadow 실제 크기와 primary/covering index page 수를 측정해 기존 24.88GiB와 비교한다.
+5. copy 중에는 random write 비용이 큰 champion covering index를 만들지 않는다. source/shadow 행 수와 전체 aggregate checksum이 일치한 뒤 한 번의 bulk DDL로 생성한다.
+6. champion별 행 수·점수 합계, NULL/orphan, 최종 index readiness를 확인한다.
+7. shadow 실제 크기와 primary/covering index page 수를 측정해 기존 24.88GiB와 비교한다.
 
 ### 운영 안전 경계
 

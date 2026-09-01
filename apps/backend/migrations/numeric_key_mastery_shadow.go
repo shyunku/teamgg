@@ -248,13 +248,19 @@ func PrepareMasteryNumericShadow(
 			return result, err
 		}
 		progress.Validated = validated
+		if !validated {
+			if err := saveMasteryNumericShadowProgress(ctx, connection, progress); err != nil {
+				return result, err
+			}
+			return result, errors.New("mastery numeric shadow row count or checksum does not match the legacy table")
+		}
+		if err := ensureMasteryNumericShadowCoveringIndex(ctx, connection); err != nil {
+			return result, err
+		}
 		if err := saveMasteryNumericShadowProgress(ctx, connection, progress); err != nil {
 			return result, err
 		}
-		result.Validated = validated
-		if !validated {
-			return result, errors.New("mastery numeric shadow row count or checksum does not match the legacy table")
-		}
+		result.Validated = true
 		if err := ensureMasteryNumericShadowSyncTriggers(ctx, connection); err != nil {
 			return result, err
 		}
@@ -307,10 +313,10 @@ func ensureMasteryNumericShadowSchema(ctx context.Context, connection *sqlx.Conn
 			return fmt.Errorf("prepare mastery numeric shadow schema: %w", err)
 		}
 	}
-	return validateMasteryNumericShadowSchema(ctx, connection)
+	return validateMasteryNumericShadowSchema(ctx, connection, false)
 }
 
-func validateMasteryNumericShadowSchema(ctx context.Context, connection *sqlx.Conn) error {
+func validateMasteryNumericShadowSchema(ctx context.Context, connection *sqlx.Conn, requireCoveringIndex bool) error {
 	var puuidColumns int
 	if err := connection.GetContext(ctx, &puuidColumns, `
 		SELECT COUNT(*)
@@ -329,7 +335,12 @@ func validateMasteryNumericShadowSchema(ctx context.Context, connection *sqlx.Co
 		columns string
 	}{
 		{"PRIMARY", "summoner_fk,champion_id"},
-		{"masteries_numeric_champion_points_level_covering_index", "champion_id,champion_points,champion_level"},
+	}
+	if requireCoveringIndex {
+		indexes = append(indexes, struct {
+			name    string
+			columns string
+		}{"masteries_numeric_champion_points_level_covering_index", "champion_id,champion_points,champion_level"})
 	}
 	for _, expected := range indexes {
 		var columns sql.NullString
@@ -348,6 +359,34 @@ func validateMasteryNumericShadowSchema(ctx context.Context, connection *sqlx.Co
 	return nil
 }
 
+func ensureMasteryNumericShadowCoveringIndex(ctx context.Context, connection *sqlx.Conn) error {
+	var columns sql.NullString
+	if err := connection.GetContext(ctx, &columns, `
+		SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index)
+		FROM information_schema.statistics
+		WHERE table_schema = DATABASE() AND table_name = 'masteries_numeric_v2'
+		  AND index_name = 'masteries_numeric_champion_points_level_covering_index'
+	`); err != nil {
+		return err
+	}
+	if columns.Valid {
+		if columns.String != "champion_id,champion_points,champion_level" {
+			return fmt.Errorf("mastery numeric covering index is %q", columns.String)
+		}
+		return nil
+	}
+	if _, err := connection.ExecContext(ctx, `
+		ALTER TABLE masteries_numeric_v2
+		ADD INDEX masteries_numeric_champion_points_level_covering_index
+			(champion_id, champion_points DESC, champion_level),
+		ALGORITHM=INPLACE,
+		LOCK=NONE
+	`); err != nil {
+		return fmt.Errorf("build mastery numeric shadow covering index: %w", err)
+	}
+	return nil
+}
+
 func masteryNumericShadowSchemaStatements() []string {
 	return []string{
 		`CREATE TABLE IF NOT EXISTS masteries_numeric_v2 (
@@ -360,9 +399,7 @@ func masteryNumericShadowSchemaStatements() []string {
 			champion_points INT NOT NULL,
 			champion_points_since_last_level BIGINT NOT NULL,
 			tokens_earned INT NOT NULL,
-			PRIMARY KEY (summoner_fk, champion_id),
-			KEY masteries_numeric_champion_points_level_covering_index
-				(champion_id, champion_points DESC, champion_level)
+			PRIMARY KEY (summoner_fk, champion_id)
 		) ENGINE=InnoDB`,
 		`CREATE TABLE IF NOT EXISTS numeric_key_mastery_shadow_progress (
 			state_key VARCHAR(32) NOT NULL,
@@ -688,7 +725,7 @@ func ValidateMasteryNumericShadowCutover(ctx context.Context, database *sqlx.DB)
 	}
 	defer connection.Close()
 
-	if err := validateMasteryNumericShadowSchema(ctx, connection); err != nil {
+	if err := validateMasteryNumericShadowSchema(ctx, connection, true); err != nil {
 		return err
 	}
 	progress, err := loadMasteryNumericShadowProgress(ctx, connection)
