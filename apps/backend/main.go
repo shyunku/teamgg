@@ -66,10 +66,11 @@ func main() {
 	masteryNumericShadowOnly := len(os.Args) > 1 && strings.EqualFold(os.Args[1], "prepare-mastery-numeric-shadow")
 	masteryNumericShadowResetOnly := len(os.Args) > 1 && strings.EqualFold(os.Args[1], "reset-mastery-numeric-shadow")
 	masteryReadBenchmarkOnly := len(os.Args) > 1 && strings.EqualFold(os.Args[1], "benchmark-mastery-reads")
+	dataRetentionCleanupOnly := len(os.Args) > 1 && strings.EqualFold(os.Args[1], "cleanup-retention")
 	requiredEnvironment := []string{
 		"DB_USER", "DB_PASSWORD", "DB_HOST", "DB_PORT", "DB_NAME",
 	}
-	if !migrationOnly && !numericKeyBackfillOnly && !masteryNumericShadowOnly && !masteryNumericShadowResetOnly && !masteryReadBenchmarkOnly {
+	if !migrationOnly && !numericKeyBackfillOnly && !masteryNumericShadowOnly && !masteryNumericShadowResetOnly && !masteryReadBenchmarkOnly && !dataRetentionCleanupOnly {
 		requiredEnvironment = append(requiredEnvironment,
 			"APP_SERVER_PORT",
 			"JWT_ACCESS_SECRET",
@@ -204,6 +205,32 @@ func main() {
 			os.Exit(-4)
 		}
 		log.Infof("Mastery read benchmark finished: %s", result.String())
+		if err := db.Root.Close(); err != nil {
+			log.Error(err)
+			os.Exit(-4)
+		}
+		return
+	}
+	if dataRetentionCleanupOnly {
+		options := migrations.DataRetentionOptionsFromEnvironment()
+		lastProgressLog := time.Now()
+		options.Progress = func(progress migrations.DataRetentionResult) {
+			if progress.DeletedMatches%1000 == 0 || time.Since(lastProgressLog) >= 30*time.Second {
+				log.Infof("Data retention cleanup progress: deletedMatches=%d rows=%v", progress.DeletedMatches, progress.DeletedRows)
+				lastProgressLog = time.Now()
+			}
+		}
+		log.Infof(
+			"Data retention cleanup starting: dryRun=%t retainedPatches=%d batchSize=%d batchTimeout=%s workLimit=%s offlineAcknowledged=%t deleteAcknowledged=%t",
+			options.DryRun, options.RetainedPatches, options.BatchSize, options.BatchTimeout,
+			options.WorkLimit, options.OfflineAcknowledged, options.DeleteAcknowledged,
+		)
+		result, cleanupErr := migrations.CleanupRetainedData(ctx, db.Root.DB, options)
+		if cleanupErr != nil {
+			log.Error(cleanupErr)
+			os.Exit(-4)
+		}
+		log.Infof("Data retention cleanup finished: %s", result.String())
 		if err := db.Root.Close(); err != nil {
 			log.Error(err)
 			os.Exit(-4)
