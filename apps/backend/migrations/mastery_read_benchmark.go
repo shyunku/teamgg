@@ -143,7 +143,9 @@ const numericMasteryTopRankersQuery = `
 	SELECT s.puuid, m.champion_points
 	FROM masteries_numeric_v2 m
 		FORCE INDEX (masteries_numeric_champion_points_level_covering_index)
-	LEFT JOIN summoners s ON m.summoner_fk = s.summoner_pk
+	INNER JOIN summoner_numeric_keys numeric_key
+		ON m.summoner_fk = numeric_key.summoner_id
+	LEFT JOIN summoners s ON numeric_key.puuid = s.puuid
 	WHERE m.champion_id = ?
 	ORDER BY m.champion_points DESC
 	LIMIT 30`

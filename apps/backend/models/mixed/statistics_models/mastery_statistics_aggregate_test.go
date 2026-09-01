@@ -168,7 +168,8 @@ func TestMasteryStatisticsUsesNumericShadowWhenEnabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(database.selectQueries[1], "FROM masteries_numeric_v2") ||
-		!strings.Contains(database.selectQueries[1], "m.summoner_fk = s.summoner_pk") {
+		!strings.Contains(database.selectQueries[1], "m.summoner_fk = numeric_key.summoner_id") ||
+		!strings.Contains(database.selectQueries[1], "numeric_key.puuid = s.puuid") {
 		t.Fatalf("numeric ranker query is unexpected: %s", database.selectQueries[1])
 	}
 }
