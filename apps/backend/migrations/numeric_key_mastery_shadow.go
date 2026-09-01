@@ -19,14 +19,25 @@ const (
 	masteryNumericShadowInsertTrigger = "teamgg_masteries_numeric_shadow_insert"
 	masteryNumericShadowUpdateTrigger = "teamgg_masteries_numeric_shadow_update"
 	masteryNumericShadowDeleteTrigger = "teamgg_masteries_numeric_shadow_delete"
+	masteryNumericShadowBatchQuery    = `
+		SELECT puuid, champion_id, champion_points_until_next_level,
+			chest_granted, last_play_time, champion_level, champion_points,
+			champion_points_since_last_level, tokens_earned
+		FROM masteries FORCE INDEX (PRIMARY)
+		WHERE (puuid, champion_id) > (?, ?)
+		ORDER BY puuid, champion_id
+		LIMIT ?
+	`
 )
 
 type MasteryNumericShadowOptions struct {
 	BatchSize           int
+	BatchTimeout        time.Duration
 	WorkLimit           time.Duration
 	MaxBatches          int
 	OfflineAcknowledged bool
 	DisableBinlog       bool
+	Progress            func(MasteryNumericShadowResult)
 }
 
 type MasteryNumericShadowResult struct {
@@ -44,9 +55,21 @@ type masteryNumericShadowProgress struct {
 	Validated        bool   `db:"validated"`
 }
 
-type masteryNumericShadowKey struct {
+type masteryNumericShadowRow struct {
+	Puuid                        string    `db:"puuid"`
+	ChampionId                   int64     `db:"champion_id"`
+	ChampionPointsUntilNextLevel int64     `db:"champion_points_until_next_level"`
+	ChestGranted                 bool      `db:"chest_granted"`
+	LastPlayTime                 time.Time `db:"last_play_time"`
+	ChampionLevel                int       `db:"champion_level"`
+	ChampionPoints               int       `db:"champion_points"`
+	ChampionPointsSinceLastLevel int64     `db:"champion_points_since_last_level"`
+	TokensEarned                 int       `db:"tokens_earned"`
+}
+
+type masteryNumericMapping struct {
 	Puuid      string `db:"puuid"`
-	ChampionId int64  `db:"champion_id"`
+	SummonerId int64  `db:"summoner_id"`
 }
 
 type masteryNumericShadowDigest struct {
@@ -59,11 +82,20 @@ func MasteryNumericShadowOptionsFromEnvironment() MasteryNumericShadowOptions {
 	disableBinlog, _ := strconv.ParseBool(strings.TrimSpace(os.Getenv("MASTERY_NUMERIC_SHADOW_DISABLE_BINLOG")))
 	return MasteryNumericShadowOptions{
 		BatchSize:           boundedMasteryNumericShadowBatchSize(os.Getenv("MASTERY_NUMERIC_SHADOW_BATCH_SIZE")),
+		BatchTimeout:        boundedMasteryNumericShadowBatchTimeout(os.Getenv("MASTERY_NUMERIC_SHADOW_BATCH_TIMEOUT")),
 		WorkLimit:           boundedNumericKeyWorkLimit(os.Getenv("MASTERY_NUMERIC_SHADOW_WORK_LIMIT")),
 		MaxBatches:          boundedMasteryNumericShadowMaxBatches(os.Getenv("MASTERY_NUMERIC_SHADOW_MAX_BATCHES")),
 		OfflineAcknowledged: offlineAcknowledged,
 		DisableBinlog:       disableBinlog,
 	}
+}
+
+func boundedMasteryNumericShadowBatchTimeout(value string) time.Duration {
+	parsed, err := time.ParseDuration(strings.TrimSpace(value))
+	if err != nil || parsed < 10*time.Second || parsed > 15*time.Minute {
+		return 2 * time.Minute
+	}
+	return parsed
 }
 
 func boundedMasteryNumericShadowBatchSize(value string) int {
@@ -93,6 +125,9 @@ func PrepareMasteryNumericShadow(
 	}
 	if options.BatchSize < 100 || options.BatchSize > 100000 {
 		options.BatchSize = 10000
+	}
+	if options.BatchTimeout < 10*time.Second || options.BatchTimeout > 15*time.Minute {
+		options.BatchTimeout = 2 * time.Minute
 	}
 	if options.WorkLimit < time.Second || options.WorkLimit > time.Hour {
 		options.WorkLimit = 10 * time.Minute
@@ -138,13 +173,16 @@ func PrepareMasteryNumericShadow(
 	deadline := time.Now().Add(options.WorkLimit)
 	batches := 0
 	for !progress.CopyCompleted && time.Now().Before(deadline) && (options.MaxBatches == 0 || batches < options.MaxBatches) {
-		keys, err := selectMasteryNumericShadowBatch(
-			ctx, connection, progress.CursorPuuid, progress.CursorChampionId, options.BatchSize,
+		batchContext, cancelBatch := context.WithTimeout(ctx, options.BatchTimeout)
+		rows, err := selectMasteryNumericShadowBatch(
+			batchContext, connection, progress.CursorPuuid, progress.CursorChampionId, options.BatchSize,
 		)
 		if err != nil {
+			cancelBatch()
 			return result, err
 		}
-		if len(keys) == 0 {
+		if len(rows) == 0 {
+			cancelBatch()
 			progress.CopyCompleted = true
 			if err := saveMasteryNumericShadowProgress(ctx, connection, progress); err != nil {
 				return result, err
@@ -152,34 +190,43 @@ func PrepareMasteryNumericShadow(
 			break
 		}
 
-		last := keys[len(keys)-1]
-		tx, err := beginNumericKeyBackfillTransactionOnConnection(ctx, connection)
+		mappings, err := loadMasteryNumericMappings(batchContext, connection, rows)
 		if err != nil {
+			cancelBatch()
 			return result, err
 		}
-		if err := copyMasteryNumericShadowRange(
-			ctx, tx,
-			progress.CursorPuuid, progress.CursorChampionId,
-			last.Puuid, last.ChampionId,
-		); err != nil {
+		last := rows[len(rows)-1]
+		tx, err := beginNumericKeyBackfillTransactionOnConnection(batchContext, connection)
+		if err != nil {
+			cancelBatch()
+			return result, err
+		}
+		if err := copyMasteryNumericShadowBatch(batchContext, tx, rows, mappings); err != nil {
 			_ = tx.Rollback()
+			cancelBatch()
 			return result, err
 		}
 
 		progress.CursorPuuid = last.Puuid
 		progress.CursorChampionId = last.ChampionId
-		progress.ProcessedRows += int64(len(keys))
+		progress.ProcessedRows += int64(len(rows))
 		progress.Validated = false
-		if err := saveMasteryNumericShadowProgress(ctx, tx, progress); err != nil {
+		if err := saveMasteryNumericShadowProgress(batchContext, tx, progress); err != nil {
 			_ = tx.Rollback()
+			cancelBatch()
 			return result, err
 		}
 		if err := tx.Commit(); err != nil {
+			cancelBatch()
 			return result, err
 		}
-		result.ProcessedThisRun += int64(len(keys))
+		cancelBatch()
+		result.ProcessedThisRun += int64(len(rows))
 		result.ProcessedTotal = progress.ProcessedRows
 		batches++
+		if options.Progress != nil {
+			options.Progress(result)
+		}
 	}
 
 	result.CopyCompleted = progress.CopyCompleted
@@ -201,6 +248,45 @@ func PrepareMasteryNumericShadow(
 		}
 	}
 	return result, nil
+}
+
+func ResetMasteryNumericShadow(ctx context.Context, database *sqlx.DB, offlineAcknowledged, resetAcknowledged bool) error {
+	if !offlineAcknowledged || !resetAcknowledged {
+		return errors.New("reset mastery numeric shadow requires MASTERY_NUMERIC_SHADOW_OFFLINE_ACK=true and MASTERY_NUMERIC_SHADOW_RESET_ACK=true")
+	}
+	connection, err := database.Connx(ctx)
+	if err != nil {
+		return err
+	}
+	defer connection.Close()
+
+	var lockAcquired int
+	if err := connection.GetContext(ctx, &lockAcquired, `SELECT GET_LOCK(?, 0)`, masteryNumericShadowLock); err != nil {
+		return fmt.Errorf("acquire mastery numeric shadow reset lock: %w", err)
+	}
+	if lockAcquired != 1 {
+		return errors.New("another mastery numeric shadow command is already running")
+	}
+	defer func() {
+		_, _ = connection.ExecContext(context.Background(), `SELECT RELEASE_LOCK(?)`, masteryNumericShadowLock)
+	}()
+
+	for _, trigger := range masteryNumericShadowSyncTriggers() {
+		if _, err := connection.ExecContext(ctx, "DROP TRIGGER IF EXISTS `"+trigger.name+"`"); err != nil {
+			return fmt.Errorf("drop mastery numeric shadow trigger %s during reset: %w", trigger.name, err)
+		}
+	}
+	if _, err := connection.ExecContext(ctx, `DROP TABLE IF EXISTS masteries_numeric_v2`); err != nil {
+		return fmt.Errorf("drop partial mastery numeric shadow: %w", err)
+	}
+	if exists, err := tableExists(ctx, database, masteryNumericShadowProgressTable); err != nil {
+		return err
+	} else if exists {
+		if _, err := connection.ExecContext(ctx, `DELETE FROM numeric_key_mastery_shadow_progress WHERE state_key = 'masteries'`); err != nil {
+			return fmt.Errorf("reset mastery numeric shadow progress: %w", err)
+		}
+	}
+	return nil
 }
 
 func ensureMasteryNumericShadowSchema(ctx context.Context, connection *sqlx.Conn) error {
@@ -335,19 +421,49 @@ func selectMasteryNumericShadowBatch(
 	cursorPuuid string,
 	cursorChampionId int64,
 	batchSize int,
-) ([]masteryNumericShadowKey, error) {
-	rows := make([]masteryNumericShadowKey, 0, batchSize)
-	err := connection.SelectContext(ctx, &rows, `
-		SELECT puuid, champion_id
-		FROM masteries FORCE INDEX (PRIMARY)
-		WHERE (puuid, champion_id) > (?, ?)
-		ORDER BY puuid, champion_id
-		LIMIT ?
-	`, cursorPuuid, cursorChampionId, batchSize)
+) ([]masteryNumericShadowRow, error) {
+	rows := make([]masteryNumericShadowRow, 0, batchSize)
+	err := connection.SelectContext(ctx, &rows, masteryNumericShadowBatchQuery, cursorPuuid, cursorChampionId, batchSize)
 	if err != nil {
 		return nil, fmt.Errorf("select mastery numeric shadow batch: %w", err)
 	}
 	return rows, nil
+}
+
+func loadMasteryNumericMappings(
+	ctx context.Context,
+	connection *sqlx.Conn,
+	rows []masteryNumericShadowRow,
+) (map[string]int64, error) {
+	puuids := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, row := range rows {
+		if _, exists := seen[row.Puuid]; exists {
+			continue
+		}
+		seen[row.Puuid] = struct{}{}
+		puuids = append(puuids, row.Puuid)
+	}
+	query, arguments, err := sqlx.In(`
+		SELECT puuid, summoner_id
+		FROM summoner_numeric_keys FORCE INDEX (summoner_numeric_keys_puuid_uindex)
+		WHERE puuid IN (?)
+	`, puuids)
+	if err != nil {
+		return nil, fmt.Errorf("build mastery numeric mapping query: %w", err)
+	}
+	var mappings []masteryNumericMapping
+	if err := connection.SelectContext(ctx, &mappings, connection.Rebind(query), arguments...); err != nil {
+		return nil, fmt.Errorf("load mastery numeric mappings: %w", err)
+	}
+	byPuuid := make(map[string]int64, len(mappings))
+	for _, mapping := range mappings {
+		byPuuid[mapping.Puuid] = mapping.SummonerId
+	}
+	if len(byPuuid) != len(puuids) {
+		return nil, fmt.Errorf("mastery numeric mappings are incomplete: expected=%d actual=%d", len(puuids), len(byPuuid))
+	}
+	return byPuuid, nil
 }
 
 func beginNumericKeyBackfillTransactionOnConnection(ctx context.Context, connection *sqlx.Conn) (*sqlx.Tx, error) {
@@ -362,40 +478,51 @@ func beginNumericKeyBackfillTransactionOnConnection(ctx context.Context, connect
 	return tx, nil
 }
 
-func copyMasteryNumericShadowRange(
+func copyMasteryNumericShadowBatch(
 	ctx context.Context,
 	tx *sqlx.Tx,
-	startPuuid string,
-	startChampionId int64,
-	endPuuid string,
-	endChampionId int64,
+	rows []masteryNumericShadowRow,
+	mappings map[string]int64,
 ) error {
-	_, err := tx.ExecContext(ctx, `
-		INSERT INTO masteries_numeric_v2 (
+	const chunkSize = 500
+	for start := 0; start < len(rows); start += chunkSize {
+		end := start + chunkSize
+		if end > len(rows) {
+			end = len(rows)
+		}
+		var query strings.Builder
+		query.WriteString(`INSERT INTO masteries_numeric_v2 (
 			summoner_fk, champion_id, champion_points_until_next_level,
 			chest_granted, last_play_time, champion_level, champion_points,
 			champion_points_since_last_level, tokens_earned
-		)
-		SELECT numeric_key.summoner_id, source.champion_id,
-			source.champion_points_until_next_level, source.chest_granted,
-			source.last_play_time, source.champion_level, source.champion_points,
-			source.champion_points_since_last_level, source.tokens_earned
-		FROM masteries source FORCE INDEX (PRIMARY)
-		INNER JOIN summoner_numeric_keys numeric_key ON numeric_key.puuid = source.puuid
-		WHERE (source.puuid, source.champion_id) > (?, ?)
-		  AND (source.puuid, source.champion_id) <= (?, ?)
-		ORDER BY source.puuid, source.champion_id
-		ON DUPLICATE KEY UPDATE
+		) VALUES `)
+		arguments := make([]interface{}, 0, (end-start)*9)
+		for index, row := range rows[start:end] {
+			summonerId, exists := mappings[row.Puuid]
+			if !exists {
+				return fmt.Errorf("mastery numeric mapping is missing for puuid %s", row.Puuid)
+			}
+			if index > 0 {
+				query.WriteString(",")
+			}
+			query.WriteString("(?,?,?,?,?,?,?,?,?)")
+			arguments = append(arguments,
+				summonerId, row.ChampionId, row.ChampionPointsUntilNextLevel,
+				row.ChestGranted, row.LastPlayTime, row.ChampionLevel,
+				row.ChampionPoints, row.ChampionPointsSinceLastLevel, row.TokensEarned,
+			)
+		}
+		query.WriteString(` ON DUPLICATE KEY UPDATE
 			champion_points_until_next_level = VALUES(champion_points_until_next_level),
 			chest_granted = VALUES(chest_granted),
 			last_play_time = VALUES(last_play_time),
 			champion_level = VALUES(champion_level),
 			champion_points = VALUES(champion_points),
 			champion_points_since_last_level = VALUES(champion_points_since_last_level),
-			tokens_earned = VALUES(tokens_earned)
-	`, startPuuid, startChampionId, endPuuid, endChampionId)
-	if err != nil {
-		return fmt.Errorf("copy mastery numeric shadow range: %w", err)
+			tokens_earned = VALUES(tokens_earned)`)
+		if _, err := tx.ExecContext(ctx, query.String(), arguments...); err != nil {
+			return fmt.Errorf("copy mastery numeric shadow batch rows %d-%d: %w", start, end, err)
+		}
 	}
 	return nil
 }

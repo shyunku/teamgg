@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"team.gg-server/controllers"
@@ -63,10 +64,11 @@ func main() {
 	championDetailCollectionOnly := len(os.Args) > 1 && strings.EqualFold(os.Args[1], "collect-champion-detail")
 	numericKeyBackfillOnly := len(os.Args) > 1 && strings.EqualFold(os.Args[1], "backfill-numeric-keys")
 	masteryNumericShadowOnly := len(os.Args) > 1 && strings.EqualFold(os.Args[1], "prepare-mastery-numeric-shadow")
+	masteryNumericShadowResetOnly := len(os.Args) > 1 && strings.EqualFold(os.Args[1], "reset-mastery-numeric-shadow")
 	requiredEnvironment := []string{
 		"DB_USER", "DB_PASSWORD", "DB_HOST", "DB_PORT", "DB_NAME",
 	}
-	if !migrationOnly && !numericKeyBackfillOnly && !masteryNumericShadowOnly {
+	if !migrationOnly && !numericKeyBackfillOnly && !masteryNumericShadowOnly && !masteryNumericShadowResetOnly {
 		requiredEnvironment = append(requiredEnvironment,
 			"APP_SERVER_PORT",
 			"JWT_ACCESS_SECRET",
@@ -140,9 +142,19 @@ func main() {
 	}
 	if masteryNumericShadowOnly {
 		options := migrations.MasteryNumericShadowOptionsFromEnvironment()
+		lastProgressLog := time.Now()
+		options.Progress = func(progress migrations.MasteryNumericShadowResult) {
+			if progress.ProcessedThisRun%100000 == 0 || time.Since(lastProgressLog) >= 30*time.Second {
+				log.Infof(
+					"Mastery numeric shadow progress: processed=%d total=%d",
+					progress.ProcessedThisRun, progress.ProcessedTotal,
+				)
+				lastProgressLog = time.Now()
+			}
+		}
 		log.Infof(
-			"Mastery numeric shadow starting: batchSize=%d workLimit=%s maxBatches=%d offlineAcknowledged=%t disableBinlog=%t",
-			options.BatchSize, options.WorkLimit, options.MaxBatches, options.OfflineAcknowledged, options.DisableBinlog,
+			"Mastery numeric shadow starting: batchSize=%d batchTimeout=%s workLimit=%s maxBatches=%d offlineAcknowledged=%t disableBinlog=%t",
+			options.BatchSize, options.BatchTimeout, options.WorkLimit, options.MaxBatches, options.OfflineAcknowledged, options.DisableBinlog,
 		)
 		result, shadowErr := migrations.PrepareMasteryNumericShadow(ctx, db.Root.DB, options)
 		if shadowErr != nil {
@@ -153,6 +165,24 @@ func main() {
 			"Mastery numeric shadow finished: processed=%d total=%d copied=%t validated=%t",
 			result.ProcessedThisRun, result.ProcessedTotal, result.CopyCompleted, result.Validated,
 		)
+		if err := db.Root.Close(); err != nil {
+			log.Error(err)
+			os.Exit(-4)
+		}
+		return
+	}
+	if masteryNumericShadowResetOnly {
+		offlineAcknowledged, _ := strconv.ParseBool(strings.TrimSpace(os.Getenv("MASTERY_NUMERIC_SHADOW_OFFLINE_ACK")))
+		resetAcknowledged, _ := strconv.ParseBool(strings.TrimSpace(os.Getenv("MASTERY_NUMERIC_SHADOW_RESET_ACK")))
+		log.Infof(
+			"Mastery numeric shadow reset starting: offlineAcknowledged=%t resetAcknowledged=%t",
+			offlineAcknowledged, resetAcknowledged,
+		)
+		if err := migrations.ResetMasteryNumericShadow(ctx, db.Root.DB, offlineAcknowledged, resetAcknowledged); err != nil {
+			log.Error(err)
+			os.Exit(-4)
+		}
+		log.Info("Mastery numeric shadow reset completed")
 		if err := db.Root.Close(); err != nil {
 			log.Error(err)
 			os.Exit(-4)

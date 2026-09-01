@@ -247,6 +247,25 @@ func TestMasteryNumericShadowMySQL(t *testing.T) {
 		legacyBytes, legacyDataBytes, legacyIndexBytes,
 		shadowBytes, shadowDataBytes, shadowIndexBytes,
 		100*(1-float64(shadowBytes)/float64(legacyBytes)))
+
+	if err := ResetMasteryNumericShadow(ctx, database, true, true); err != nil {
+		t.Fatalf("reset validated mastery shadow: %v", err)
+	}
+	var shadowTables, progressRows int
+	if err := database.GetContext(ctx, &shadowTables, `
+		SELECT COUNT(*) FROM information_schema.tables
+		WHERE table_schema = DATABASE() AND table_name = 'masteries_numeric_v2'
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.GetContext(ctx, &progressRows, `
+		SELECT COUNT(*) FROM numeric_key_mastery_shadow_progress WHERE state_key = 'masteries'
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if shadowTables != 0 || progressRows != 0 {
+		t.Fatalf("mastery shadow reset is incomplete: tables=%d progress=%d", shadowTables, progressRows)
+	}
 }
 
 func createMasteryNumericShadowFixture(t *testing.T, ctx context.Context, database *sqlx.DB, summonerCount int) {

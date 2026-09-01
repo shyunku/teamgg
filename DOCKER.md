@@ -126,13 +126,29 @@ docker compose run --rm \
 ```
 
 `MASTERY_NUMERIC_SHADOW_BATCH_SIZE` defaults to `10000` (`100`-`100000`) and
-`MASTERY_NUMERIC_SHADOW_WORK_LIMIT` defaults to `10m` (`1s`-`1h`). The command
+`MASTERY_NUMERIC_SHADOW_BATCH_TIMEOUT` defaults to `2m` (`10s`-`15m`) so a
+single unexpected SQL plan cannot run indefinitely. `MASTERY_NUMERIC_SHADOW_WORK_LIMIT`
+defaults to `10m` (`1s`-`1h`). The command
 also accepts `MASTERY_NUMERIC_SHADOW_MAX_BATCHES`; `0` disables the batch-count
 cap while retaining the work limit. The command
 creates no normal-startup migration and never renames or drops the legacy
 table. Re-run it until `copied=true validated=true`; keep the backend stopped
 until the read/write cutover procedure has been verified. Do not persist the
 offline acknowledgement as `true` in a production environment file.
+
+If a partial shadow became stale because the backend resumed before validation,
+discard only that rebuildable shadow and its cursor before retrying:
+
+```bash
+docker compose stop backend
+docker compose run --rm \
+  -e MASTERY_NUMERIC_SHADOW_OFFLINE_ACK=true \
+  -e MASTERY_NUMERIC_SHADOW_RESET_ACK=true \
+  backend reset-mastery-numeric-shadow
+```
+
+The reset command never changes legacy `masteries`; both acknowledgements are
+required and must not be persisted as `true`.
 
 The command installs atomic legacy-to-shadow synchronization triggers only
 after the full copy checksum passes. The backend continues to write the legacy

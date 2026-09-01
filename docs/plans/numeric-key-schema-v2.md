@@ -108,7 +108,7 @@ CREATE TABLE masteries_numeric_v2 (
 
 1. `masteries.puuid` 중 `summoner_numeric_keys`에 없는 값이 0건인지 확인한다.
 2. 기존 PK `(puuid, champion_id)` 순서로 제한된 keyset batch를 읽는다.
-3. 같은 범위만 shadow에 `INSERT ... SELECT`하고 cursor를 원자적으로 저장한다.
+3. 범위 SELECT에는 JOIN을 넣지 않는다. 선택된 batch의 고유 PUUID만 숫자 mapping index로 별도 조회한 뒤 500행 단위 `VALUES` bulk insert로 shadow에 저장한다.
 4. 실행 제한 시간이 끝나면 정상 종료하고 다음 실행에서 cursor 이후부터 재개한다.
 5. source/shadow 행 수, champion별 행 수·점수 합계, 전체 aggregate checksum, NULL/orphan을 비교한다.
 6. shadow 실제 크기와 primary/covering index page 수를 측정해 기존 24.88GiB와 비교한다.
@@ -118,6 +118,7 @@ CREATE TABLE masteries_numeric_v2 (
 - 일반 backend 기동과 `migrate`는 shadow copy를 시작하지 않는다.
 - 별도 명시적 maintenance command와 offline acknowledgement만 schema 준비·copy·검증을 실행한다.
 - 기본 batch와 work limit에 상한을 두고, 디스크 12GiB 미만·lock wait·오류 발생 시 copy를 중단한다.
+- batch별 hard timeout을 적용해 단일 SQL이 전체 work limit을 무시하고 장시간 실행되지 않게 한다.
 - binlog 비활성화는 replica 0건과 별도 사용자 승인을 동시에 확인한 운영 copy session에서만 허용한다. 기본값은 binlog 기록이다.
 - 검증 전 rename, legacy drop, feature flag 기본값 변경을 금지한다.
 - `MASTERY_READ_SOURCE=numeric_v2`로 기동할 때 schema, copy 완료, validated 상태와 sync trigger 3개를 모두 확인하고 하나라도 없으면 backend 시작을 거부한다.

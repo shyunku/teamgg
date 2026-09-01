@@ -16,15 +16,40 @@ func TestMasteryNumericShadowRequiresExplicitOfflineAcknowledgement(t *testing.T
 
 func TestMasteryNumericShadowOptionsAreBounded(t *testing.T) {
 	t.Setenv("MASTERY_NUMERIC_SHADOW_BATCH_SIZE", "500")
+	t.Setenv("MASTERY_NUMERIC_SHADOW_BATCH_TIMEOUT", "45s")
 	t.Setenv("MASTERY_NUMERIC_SHADOW_WORK_LIMIT", "5m")
 	t.Setenv("MASTERY_NUMERIC_SHADOW_MAX_BATCHES", "3")
 	t.Setenv("MASTERY_NUMERIC_SHADOW_OFFLINE_ACK", "true")
 	t.Setenv("MASTERY_NUMERIC_SHADOW_DISABLE_BINLOG", "true")
 
 	options := MasteryNumericShadowOptionsFromEnvironment()
-	if options.BatchSize != 500 || options.WorkLimit != 5*time.Minute || options.MaxBatches != 3 ||
+	if options.BatchSize != 500 || options.BatchTimeout != 45*time.Second || options.WorkLimit != 5*time.Minute || options.MaxBatches != 3 ||
 		!options.OfflineAcknowledged || !options.DisableBinlog {
 		t.Fatalf("unexpected options: %+v", options)
+	}
+}
+
+func TestMasteryNumericShadowBatchSelectCannotJoinBeforeLimit(t *testing.T) {
+	query := strings.ToLower(strings.Join(strings.Fields(masteryNumericShadowBatchQuery), " "))
+	if strings.Contains(query, " join ") {
+		t.Fatalf("bounded source query must not contain a join: %s", query)
+	}
+	for _, expected := range []string{
+		"from masteries force index (primary)",
+		"where (puuid, champion_id) > (?, ?)",
+		"order by puuid, champion_id limit ?",
+	} {
+		if !strings.Contains(query, expected) {
+			t.Fatalf("bounded source query does not contain %q: %s", expected, query)
+		}
+	}
+}
+
+func TestResetMasteryNumericShadowRequiresBothAcknowledgements(t *testing.T) {
+	for _, acknowledgements := range [][2]bool{{false, false}, {true, false}, {false, true}} {
+		if err := ResetMasteryNumericShadow(context.Background(), nil, acknowledgements[0], acknowledgements[1]); err == nil {
+			t.Fatalf("reset accepted acknowledgements offline=%t reset=%t", acknowledgements[0], acknowledgements[1])
+		}
 	}
 }
 
