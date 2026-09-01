@@ -61,6 +61,19 @@ func TestMasteryNumericShadowMySQL(t *testing.T) {
 	createMasteryNumericShadowFixture(t, ctx, database, summonerCount)
 	t.Logf("created %d mastery fixture rows in %s", expectedRows, time.Since(fixtureStarted))
 
+	var batchPlan string
+	if err := database.GetContext(ctx, &batchPlan,
+		"EXPLAIN FORMAT=JSON "+masteryNumericShadowBatchQuery,
+		fixtureMasteryPuuid(summonerCount/2), fixtureMasteryPuuid(summonerCount/2), 50, 10000,
+	); err != nil {
+		t.Fatal(err)
+	}
+	normalizedPlan := strings.ToLower(batchPlan)
+	if !strings.Contains(normalizedPlan, `"access_type": "range"`) ||
+		!strings.Contains(normalizedPlan, `"key": "primary"`) {
+		t.Fatalf("mastery batch query is not a PRIMARY range scan: %s", batchPlan)
+	}
+
 	lockConnection, err := database.Connx(ctx)
 	if err != nil {
 		t.Fatal(err)

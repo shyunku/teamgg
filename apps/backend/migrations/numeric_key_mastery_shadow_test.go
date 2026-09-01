@@ -36,12 +36,15 @@ func TestMasteryNumericShadowBatchSelectCannotJoinBeforeLimit(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"from masteries force index (primary)",
-		"where (puuid, champion_id) > (?, ?)",
+		"where puuid > ? or (puuid = ? and champion_id > ?)",
 		"order by puuid, champion_id limit ?",
 	} {
 		if !strings.Contains(query, expected) {
 			t.Fatalf("bounded source query does not contain %q: %s", expected, query)
 		}
+	}
+	if strings.Contains(query, "(puuid, champion_id) >") {
+		t.Fatalf("row-constructor cursor can degrade into a prefix scan on production MySQL: %s", query)
 	}
 }
 

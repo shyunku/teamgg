@@ -24,7 +24,7 @@ const (
 			chest_granted, last_play_time, champion_level, champion_points,
 			champion_points_since_last_level, tokens_earned
 		FROM masteries FORCE INDEX (PRIMARY)
-		WHERE (puuid, champion_id) > (?, ?)
+		WHERE puuid > ? OR (puuid = ? AND champion_id > ?)
 		ORDER BY puuid, champion_id
 		LIMIT ?
 	`
@@ -435,7 +435,10 @@ func selectMasteryNumericShadowBatch(
 	batchSize int,
 ) ([]masteryNumericShadowRow, error) {
 	rows := make([]masteryNumericShadowRow, 0, batchSize)
-	err := connection.SelectContext(ctx, &rows, masteryNumericShadowBatchQuery, cursorPuuid, cursorChampionId, batchSize)
+	err := connection.SelectContext(
+		ctx, &rows, masteryNumericShadowBatchQuery,
+		cursorPuuid, cursorPuuid, cursorChampionId, batchSize,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("select mastery numeric shadow batch: %w", err)
 	}
