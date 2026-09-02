@@ -87,12 +87,12 @@ func createDataRetentionFixture(t *testing.T, database *sqlx.DB) {
 	t.Helper()
 	statements := []string{
 		`CREATE TABLE matches (match_id VARCHAR(32) PRIMARY KEY, game_version VARCHAR(32) NOT NULL, KEY matches_game_version_index (game_version)) ENGINE=InnoDB`,
-		`CREATE TABLE match_participants (match_id VARCHAR(32), participant_id INT, match_participant_id VARCHAR(32) PRIMARY KEY, puuid VARCHAR(32)) ENGINE=InnoDB`,
+		`CREATE TABLE match_participants (match_id VARCHAR(32), participant_id INT, match_participant_id VARCHAR(32) PRIMARY KEY, puuid VARCHAR(32), KEY match_participants_match_id_index (match_id)) ENGINE=InnoDB`,
 		`CREATE TABLE match_participant_details (match_participant_id VARCHAR(32) PRIMARY KEY, match_id VARCHAR(32)) ENGINE=InnoDB`,
 		`CREATE TABLE match_participant_perks (match_participant_id VARCHAR(32) PRIMARY KEY) ENGINE=InnoDB`,
 		`CREATE TABLE match_participant_perk_styles (match_participant_id VARCHAR(32), style_id VARCHAR(32) PRIMARY KEY) ENGINE=InnoDB`,
 		`CREATE TABLE match_participant_perk_style_selections (style_id VARCHAR(32), perk INT) ENGINE=InnoDB`,
-		`CREATE TABLE match_participant_numeric_keys (match_participant_id BIGINT PRIMARY KEY, legacy_match_participant_id VARCHAR(32)) ENGINE=InnoDB`,
+		`CREATE TABLE match_participant_numeric_keys (match_participant_id BIGINT PRIMARY KEY, legacy_match_participant_id VARCHAR(32), UNIQUE KEY match_participant_numeric_keys_legacy_uindex (legacy_match_participant_id)) ENGINE=InnoDB`,
 		`CREATE TABLE match_team_bans (match_id VARCHAR(32), team_id INT) ENGINE=InnoDB`,
 		`CREATE TABLE match_teams (match_id VARCHAR(32), team_id INT) ENGINE=InnoDB`,
 		`CREATE TABLE summoner_matches (puuid VARCHAR(32), match_id VARCHAR(32)) ENGINE=InnoDB`,

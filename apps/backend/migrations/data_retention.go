@@ -105,14 +105,6 @@ var retentionMatchDeleteStatements = []retentionDeleteStatement{
 			WHERE participant.match_id IN (?)`,
 	},
 	{
-		Name: "match_participant_numeric_keys",
-		Query: `DELETE numeric_participant
-			FROM match_participants participant
-			STRAIGHT_JOIN match_participant_numeric_keys numeric_participant
-				ON numeric_participant.legacy_match_participant_id = participant.match_participant_id
-			WHERE participant.match_id IN (?)`,
-	},
-	{
 		Name:  "match_participants",
 		Query: `DELETE FROM match_participants WHERE match_id IN (?)`,
 	},
@@ -366,6 +358,14 @@ func deleteRetentionMatchBatch(ctx context.Context, tx *sqlx.Tx, matchIDs []stri
 	deleted := make(map[string]int64, len(retentionMatchDeleteStatements))
 	durations := make(map[string]time.Duration, len(retentionMatchDeleteStatements))
 	for _, statement := range retentionMatchDeleteStatements {
+		if statement.Name == "match_participants" {
+			rows, duration, err := deleteRetentionParticipantNumericKeys(ctx, tx, matchIDs)
+			durations["match_participant_numeric_keys"] = duration
+			if err != nil {
+				return nil, nil, err
+			}
+			deleted["match_participant_numeric_keys"] = rows
+		}
 		query, args, err := sqlx.In(statement.Query, matchIDs)
 		if err != nil {
 			return nil, nil, fmt.Errorf("bind retention delete for %s: %w", statement.Name, err)
@@ -383,4 +383,44 @@ func deleteRetentionMatchBatch(ctx context.Context, tx *sqlx.Tx, matchIDs []stri
 		deleted[statement.Name] = rows
 	}
 	return deleted, durations, nil
+}
+
+func deleteRetentionParticipantNumericKeys(ctx context.Context, tx *sqlx.Tx, matchIDs []string) (int64, time.Duration, error) {
+	started := time.Now()
+	selectQuery, selectArgs, err := sqlx.In(`
+		SELECT numeric_participant.match_participant_id
+		FROM match_participants participant
+		STRAIGHT_JOIN match_participant_numeric_keys numeric_participant
+			FORCE INDEX (match_participant_numeric_keys_legacy_uindex)
+			ON numeric_participant.legacy_match_participant_id = participant.match_participant_id
+		WHERE participant.match_id IN (?)
+	`, matchIDs)
+	if err != nil {
+		return 0, time.Since(started), fmt.Errorf("bind retention numeric participant lookup: %w", err)
+	}
+
+	numericIDs := make([]uint64, 0, len(matchIDs)*10)
+	if err := tx.SelectContext(ctx, &numericIDs, tx.Rebind(selectQuery), selectArgs...); err != nil {
+		return 0, time.Since(started), fmt.Errorf("select retention numeric participant keys: %w", err)
+	}
+	if len(numericIDs) == 0 {
+		return 0, time.Since(started), nil
+	}
+
+	deleteQuery, deleteArgs, err := sqlx.In(`
+		DELETE FROM match_participant_numeric_keys
+		WHERE match_participant_id IN (?)
+	`, numericIDs)
+	if err != nil {
+		return 0, time.Since(started), fmt.Errorf("bind retention numeric participant delete: %w", err)
+	}
+	result, err := tx.ExecContext(ctx, tx.Rebind(deleteQuery), deleteArgs...)
+	if err != nil {
+		return 0, time.Since(started), fmt.Errorf("delete retained rows from match_participant_numeric_keys: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return 0, time.Since(started), fmt.Errorf("read retention delete result for match_participant_numeric_keys: %w", err)
+	}
+	return rows, time.Since(started), nil
 }
