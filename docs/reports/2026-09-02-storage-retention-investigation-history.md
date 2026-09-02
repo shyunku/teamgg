@@ -127,4 +127,9 @@
 
 ## 최종 정리
 
-완료 후 확정 정책, 구현 내용, 삭제·아카이브 범위, 전후 지표와 운영 검증을 정리한다.
+- 최신 8개 패치(`16.17`~`16.10`)의 경기 상세를 보존하고 이전 패치 데이터는 삭제하는 정책으로 확정했다. S3 아카이브는 사용하지 않는다.
+- `cleanup-retention`은 기본 dry-run이며 delete/offline 승인, 100경기 배치, batch timeout, 전체 work limit을 요구한다. 운영 supervisor는 디스크 여유 12GiB 미만에서 중단하고 종료 시 백엔드를 복구한다.
+- 초기 병목 분석 후 대형 child table delete를 대상 경기 PK 경로로 제한했다. 숫자 match/participant identity는 재수집 시 ID 안정성을 위해 최종 정책에서 보존한다.
+- 사전 검증 130건과 세 차례 bounded run 16,200건·16,800건·15,221건으로 총 48,351경기를 정리했다. 마지막 run은 `eligibleMatches=15,221`, `deletedMatches=15,221`, `completed=true`로 종료됐다.
+- 2026-09-02 22:34 KST 최종 dry-run에서 `eligibleMatches=0`, `completed=true`를 확인했다. backend는 healthy이며 `/`, champion, meta-summary API가 모두 HTTP 200이고 DataExplorer는 비활성 상태다.
+- 종료 시 루트 파일시스템은 128GiB 중 약 112GiB 사용, 약 16GiB 여유다. InnoDB 행 삭제 공간은 내부 재사용 영역이므로 OS 공간 즉시 감소를 기대하지 않으며, 향후 자동 실행은 #76에서 관리한다.
