@@ -107,9 +107,9 @@ var retentionMatchDeleteStatements = []retentionDeleteStatement{
 	{
 		Name: "match_participant_numeric_keys",
 		Query: `DELETE numeric_participant
-			FROM match_participant_numeric_keys numeric_participant
-			INNER JOIN match_participants participant
-				ON participant.match_participant_id = numeric_participant.legacy_match_participant_id
+			FROM match_participants participant
+			STRAIGHT_JOIN match_participant_numeric_keys numeric_participant
+				ON numeric_participant.legacy_match_participant_id = participant.match_participant_id
 			WHERE participant.match_id IN (?)`,
 	},
 	{
