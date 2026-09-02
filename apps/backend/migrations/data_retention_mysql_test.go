@@ -156,6 +156,9 @@ func assertRetentionFixtureCounts(t *testing.T, database *sqlx.DB, matches, chil
 		if table == "matches" {
 			expected = matches
 		}
+		if table == "match_participant_numeric_keys" || table == "match_numeric_keys" {
+			expected = 4
+		}
 		if count != expected {
 			t.Fatalf("unexpected %s count: got=%d want=%d", table, count, expected)
 		}

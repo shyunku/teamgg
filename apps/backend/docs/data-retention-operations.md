@@ -51,14 +51,15 @@ The command can stop at its work limit and be rerun. Deleted rows are gone, so t
 ## Delete order
 
 1. Perk selections, styles, perks, participant details
-2. Participant numeric mappings and participants
+2. Participants
 3. Team bans and teams
 4. Summoner-match and DataExplorer relationships
 5. Incremental-statistics processed markers
-6. Match numeric mappings
-7. Matches
+6. Matches
 
 Each batch is one transaction and uses `binlog_row_image=MINIMAL`. Any statement failure rolls back the current batch.
+
+Numeric match and participant identity mappings are retained. They are migration infrastructure rather than raw match payload, and preserving them lets a later re-fetch reuse the same numeric IDs while participant backfill and read cutover remain incomplete.
 
 ## Verification
 
