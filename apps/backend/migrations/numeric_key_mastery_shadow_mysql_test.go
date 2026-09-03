@@ -16,6 +16,16 @@ import (
 
 func TestMasteryNumericShadowMySQL(t *testing.T) {
 	dsn := os.Getenv("TEAMGG_NUMERIC_KEY_MYSQL_TEST_DSN")
+	if dsn == "" && os.Getenv("TEAMGG_NUMERIC_KEY_MYSQL_TEST_FROM_DB_ENV") == "true" {
+		config := mysql.NewConfig()
+		config.User = os.Getenv("DB_USER")
+		config.Passwd = os.Getenv("DB_PASSWORD")
+		config.Net = "tcp"
+		config.Addr = os.Getenv("DB_HOST") + ":" + os.Getenv("DB_PORT")
+		config.ParseTime = true
+		config.MultiStatements = true
+		dsn = config.FormatDSN()
+	}
 	if dsn == "" {
 		t.Skip("TEAMGG_NUMERIC_KEY_MYSQL_TEST_DSN is not set")
 	}
@@ -311,6 +321,16 @@ func TestMasteryNumericShadowMySQL(t *testing.T) {
 
 func TestMasteryLegacyRetirementMySQL(t *testing.T) {
 	dsn := os.Getenv("TEAMGG_NUMERIC_KEY_MYSQL_TEST_DSN")
+	if dsn == "" && os.Getenv("TEAMGG_NUMERIC_KEY_MYSQL_TEST_FROM_DB_ENV") == "true" {
+		config := mysql.NewConfig()
+		config.User = os.Getenv("DB_USER")
+		config.Passwd = os.Getenv("DB_PASSWORD")
+		config.Net = "tcp"
+		config.Addr = os.Getenv("DB_HOST") + ":" + os.Getenv("DB_PORT")
+		config.ParseTime = true
+		config.MultiStatements = true
+		dsn = config.FormatDSN()
+	}
 	if dsn == "" {
 		t.Skip("TEAMGG_NUMERIC_KEY_MYSQL_TEST_DSN is not set")
 	}
