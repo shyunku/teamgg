@@ -166,6 +166,21 @@ base 쿼리는 관찰 기준 1,560초에서 917초로 최소 41.2% 짧아졌지�
 
 복구 후 backend는 `validate` 기동과 health check를 통과했고 공개 API 3개가 모두 HTTP 200을 반환했다. 10분 initial delay 뒤 첫 background 구간이 `602경기 / 60.42초`를 처리해 cursor `KR_8349189095`로 이어졌으며, 이후에도 cursor가 `KR_8350045991`까지 전진했다. 수동 종료 전 완료 배치와 재시작 cursor가 정상 보존되고 글로벌 통계 락이 정상 해제됐음을 확인했다.
 
+#### 수정 7차 — background 백필 완료 확인
+
+2026-08-31 16:09 KST에 운영 상태를 다시 읽기 전용으로 확인했다. 대상 full version 6개의 진행 상태가 모두 `completed=1`이었고 처리 경기 합계는 500,470건이었다.
+
+| full version | 처리 경기 | 완료 |
+| --- | ---: | ---: |
+| `16.17.810.4348` | 30,904 | 1 |
+| `16.16.804.9184` | 198,119 | 1 |
+| `16.15.802.4387` | 144,360 | 1 |
+| `16.15.801.3452` | 92,783 | 1 |
+| `16.15.800.8073` | 19,768 | 1 |
+| `16.15.799.6036` | 14,536 | 1 |
+
+source 완료 뒤 base·position·meta·counter 집계와 shared snapshot 교체도 완료됐다. champion 및 meta-summary API가 동일한 새 `updatedAt` `2026-08-30T18:30:56.081618598Z`(KST 2026-08-31 03:30)를 반환했으며, 현재 수집 loop는 snapshot이 아직 fresh하다고 판단해 만료 시점까지 재수집을 skip한다. 이로써 초기 백필, 최종 집계, 공개 API 갱신과 반복 실행 skip 검증을 모두 충족했다.
+
 첫 최적화 실행 직전과 모든 검증 종료 후의 MySQL 전역 지표는 다음과 같다. 같은 기간 DataExplorer가 계속 실행되어 통계 작업 단독 수치로 해석할 수 없다.
 
 | 지표 | 직전 | 종료 후 | 변화 |
@@ -181,9 +196,9 @@ base 쿼리는 관찰 기준 1,560초에서 917초로 최소 41.2% 짧아졌지�
 - replay-analyzer 컨테이너: healthy
 - 일회성 검증 컨테이너: 제거 완료
 - 마이그레이션: `20260830_003`을 포함해 backend `validate` 기동 통과
-- Champion Detail 증분 source: 완료 배치와 cursor 보존, 일반 background loop에서 계속 처리
+- Champion Detail 증분 source: 대상 full version 6개, 총 500,470경기 백필 완료
 - 공개 `/`, champion, meta-summary API: HTTP 200
-- 공개 Champion Detail snapshot: 백필 완료 전이므로 기존 `2026-07-30T17:54:37.296246254Z` snapshot 유지
+- 공개 Champion Detail snapshot: `2026-08-30T18:30:56.081618598Z`로 갱신 완료
 - 원본 경기·참가자·숙련도 데이터 삭제 없음
 
 ## 6. 결론 및 후속 작업
@@ -192,4 +207,4 @@ Task #61은 운영 배포·수집·snapshot·실행계획 검증을 완료했다
 
 Task #62는 작은 배치, 재시작 가능 cursor, 처리 완료 마커, 실행 시간 제한을 갖춘 증분 source로 전환해 기존 장기 대형 쿼리 문제를 제거했다. 운영 집중 검증에서도 약 50분 동안 오류 없이 58,150경기를 처리했다.
 
-다만 전체 초기 백필과 새 snapshot 생성이 아직 끝나지 않았으므로 WIP를 유지한다. background 백필 완료 후 base·position·meta·counter 단계별 완료 시간, snapshot 크기, 공개 API 갱신 및 두 번째 실행의 빠른 skip까지 검증해야 Task #62를 DONE으로 전환할 수 있다.
+이후 background 백필이 대상 full version 6개와 총 500,470경기를 모두 완료했고 base·position·meta·counter 집계, 새 snapshot/API 갱신, fresh snapshot 재실행 skip을 확인했다. 따라서 Task #62의 운영 완료 조건을 모두 충족해 DONE으로 전환한다.
