@@ -719,6 +719,29 @@ func validateMasteryNumericShadowSyncTriggers(ctx context.Context, connection *s
 }
 
 func ValidateMasteryNumericShadowCutover(ctx context.Context, database *sqlx.DB) error {
+	if err := ValidateMasteryNumericStorage(ctx, database); err != nil {
+		return err
+	}
+	connection, err := database.Connx(ctx)
+	if err != nil {
+		return err
+	}
+	defer connection.Close()
+
+	triggersReady, err := validateMasteryNumericShadowSyncTriggers(ctx, connection)
+	if err != nil {
+		return err
+	}
+	if !triggersReady {
+		return errors.New("mastery numeric shadow synchronization triggers are not ready")
+	}
+	return nil
+}
+
+// ValidateMasteryNumericStorage verifies that the compact copy is complete and
+// safe to read or write. Synchronization is validated separately because task
+// #73 replaces database shadow triggers with transactional application writes.
+func ValidateMasteryNumericStorage(ctx context.Context, database *sqlx.DB) error {
 	connection, err := database.Connx(ctx)
 	if err != nil {
 		return err
@@ -734,13 +757,6 @@ func ValidateMasteryNumericShadowCutover(ctx context.Context, database *sqlx.DB)
 	}
 	if !progress.CopyCompleted || !progress.Validated {
 		return errors.New("mastery numeric shadow copy is not completed and validated")
-	}
-	triggersReady, err := validateMasteryNumericShadowSyncTriggers(ctx, connection)
-	if err != nil {
-		return err
-	}
-	if !triggersReady {
-		return errors.New("mastery numeric shadow synchronization triggers are not ready")
 	}
 	return nil
 }

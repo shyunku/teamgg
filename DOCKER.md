@@ -151,17 +151,40 @@ The reset command never changes legacy `masteries`; both acknowledgements are
 required and must not be persisted as `true`.
 
 The command installs atomic legacy-to-shadow synchronization triggers only
-after the full copy checksum passes. The backend continues to write the legacy
-table, so rollback remains available. To switch reads after validation, set:
+after the full copy checksum passes. Before the direct-write cutover, the
+backend continues to write the legacy table. To switch reads after validation,
+set:
 
 ```env
 MASTERY_READ_SOURCE=numeric_v2
 ```
 
 Then start the backend and confirm `Mastery read source: numeric_v2` before
-checking summoner mastery and statistics APIs. Set it back to `legacy` and
-restart the backend for an immediate read rollback; synchronized writes keep
-the legacy table current.
+checking summoner mastery and statistics APIs.
+
+After numeric reads are verified, deploy the direct-write version while the
+backend is stopped and apply the one-time trigger cutover:
+
+```bash
+docker compose stop backend
+docker compose run --rm \
+  -e MASTERY_WRITE_CUTOVER_OFFLINE_ACK=true \
+  backend migrate
+```
+
+Keep `MASTERY_WRITE_CUTOVER_OFFLINE_ACK=false` in the environment file. Then
+set both sources and recreate the backend:
+
+```env
+MASTERY_READ_SOURCE=numeric_v2
+MASTERY_WRITE_SOURCE=numeric_v2
+```
+
+The application writes `numeric_v2` first and mirrors legacy in the same
+transaction during the observation period. Set both values back to `legacy`
+and recreate the backend for an immediate rollback; the numeric table also
+continues to receive a transactional mirror. Do not remove legacy `masteries`
+until the separate retirement task is approved.
 
 `MASTERY_NUMERIC_SHADOW_DISABLE_BINLOG` defaults to `false`. Set it to `true`
 only after confirming there are no replicas and explicitly accepting that the

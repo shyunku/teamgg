@@ -156,13 +156,13 @@ func RenewSummonerMastery(db db.Context, puuid string) error {
 		return err
 	}
 
+	entities := make([]*models.MasteryDAO, 0, len(*masteries))
 	for _, mastery := range *masteries {
 		if mastery.Puuid != puuid {
 			log.Errorf("mastery puuid (%s) != summoner puuid (%s)", mastery.Puuid, puuid)
 			return errors.New("mastery puuid is not equal to summoner puuid")
 		}
 
-		// upsert mastery
 		masteryEntity := &models.MasteryDAO{
 			Puuid:                        puuid,
 			ChampionId:                   mastery.ChampionId,
@@ -175,12 +175,9 @@ func RenewSummonerMastery(db db.Context, puuid string) error {
 			TokensEarned:                 mastery.TokensEarned,
 		}
 
-		if err := masteryEntity.Upsert(db); err != nil {
-			return err
-		}
+		entities = append(entities, masteryEntity)
 	}
-
-	return nil
+	return models.ReplaceMasteries(db, puuid, entities)
 }
 
 func RenewSummonerMatches(db db.Context, puuid string, option *api.MatchIdsReqOption) error {

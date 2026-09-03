@@ -244,14 +244,27 @@ func main() {
 		log.Error(err)
 		os.Exit(-4)
 	}
+	if err := models.ConfigureMasteryWriteSource(os.Getenv("MASTERY_WRITE_SOURCE")); err != nil {
+		log.Error(err)
+		os.Exit(-4)
+	}
 	if models.MasteryNumericV2ReadsEnabled() {
-		if err := migrations.ValidateMasteryNumericShadowCutover(ctx, db.Root.DB); err != nil {
+		if err := migrations.ValidateMasteryNumericStorage(ctx, db.Root.DB); err != nil {
 			log.Error(fmt.Errorf("mastery numeric read cutover is not ready: %w", err))
 			os.Exit(-4)
 		}
 		log.Info("Mastery read source: numeric_v2")
 	} else {
 		log.Info("Mastery read source: legacy")
+	}
+	if models.MasteryNumericV2WritesEnabled() {
+		if err := migrations.ValidateMasteryNumericStorage(ctx, db.Root.DB); err != nil {
+			log.Error(fmt.Errorf("mastery numeric write cutover is not ready: %w", err))
+			os.Exit(-4)
+		}
+		log.Info("Mastery write source: numeric_v2 (legacy rollback mirror enabled)")
+	} else {
+		log.Info("Mastery write source: legacy (numeric_v2 mirror enabled)")
 	}
 	if err := service.RootDatabaseInitializer(db.Root.DB); err != nil {
 		log.Error(fmt.Errorf("failed to initialize database: %w", err))

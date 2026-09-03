@@ -39,6 +39,20 @@ func TestConfigureMasteryReadSource(t *testing.T) {
 	}
 }
 
+func TestConfigureMasteryWriteSource(t *testing.T) {
+	t.Cleanup(func() { _ = ConfigureMasteryWriteSource(MasteryWriteSourceLegacy) })
+
+	if err := ConfigureMasteryWriteSource(""); err != nil || MasteryNumericV2WritesEnabled() {
+		t.Fatalf("empty source must select legacy: enabled=%t err=%v", MasteryNumericV2WritesEnabled(), err)
+	}
+	if err := ConfigureMasteryWriteSource("numeric_v2"); err != nil || !MasteryNumericV2WritesEnabled() {
+		t.Fatalf("numeric_v2 source was not enabled: enabled=%t err=%v", MasteryNumericV2WritesEnabled(), err)
+	}
+	if err := ConfigureMasteryWriteSource("unknown"); err == nil {
+		t.Fatal("invalid mastery write source was accepted")
+	}
+}
+
 func TestGetMasteryDAOsSelectsConfiguredStorage(t *testing.T) {
 	t.Cleanup(func() { _ = ConfigureMasteryReadSource(MasteryReadSourceLegacy) })
 	database := &masteryStorageTestContext{}

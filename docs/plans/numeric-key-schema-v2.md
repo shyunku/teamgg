@@ -101,8 +101,10 @@ CREATE TABLE masteries_numeric_v2 (
 - copy 중에는 mirror trigger를 설치하지 않는다. 전체 checksum 검증이 통과한 뒤에만 legacy `masteries`의 INSERT/UPDATE/DELETE를 shadow에 같은 트랜잭션으로 반영하는 sync trigger를 설치한다.
 - copy 도중 실패해도 legacy table은 변경하지 않으며 저장된 cursor부터 재개한다.
 - copy가 완료된 뒤에도 backend를 올리기 전에 consistent snapshot 검증과 sync trigger 설치를 마친다.
-- 애플리케이션 쓰기는 당분간 legacy를 원본으로 유지하고 `MASTERY_READ_SOURCE=numeric_v2`일 때만 일반 조회와 숙련도 통계를 shadow로 전환한다. 문제가 있으면 `legacy`로 되돌리고 재시작하며, legacy 쓰기는 계속 최신 상태이므로 데이터 rollback이 필요하지 않다.
-- 향후 legacy 제거 단계에서 application write를 numeric table로 전환하고 sync trigger를 제거한다.
+- 읽기 전환 검증 뒤 `MASTERY_WRITE_SOURCE=numeric_v2`로 애플리케이션 쓰기 원본을 전환한다. 관찰 기간에는 애플리케이션이 선택한 원본을 먼저 쓰고 반대편 저장소를 같은 트랜잭션에서 갱신한다.
+- 직접 쓰기 전환 마이그레이션은 backend 중단과 일회성 `MASTERY_WRITE_CUTOVER_OFFLINE_ACK=true`를 요구하며, 기존 legacy→shadow trigger를 제거한다.
+- 문제가 있으면 `MASTERY_READ_SOURCE=legacy`, `MASTERY_WRITE_SOURCE=legacy`로 되돌리고 재시작한다. 양쪽 저장소가 함께 갱신되므로 데이터 복사 없이 롤백할 수 있다.
+- 향후 legacy 제거 단계에서 legacy mirror와 통계 trigger 의존성을 제거한다.
 
 ### copy 및 검증
 
@@ -122,7 +124,7 @@ CREATE TABLE masteries_numeric_v2 (
 - batch별 hard timeout을 적용해 단일 SQL이 전체 work limit을 무시하고 장시간 실행되지 않게 한다.
 - binlog 비활성화는 replica 0건과 별도 사용자 승인을 동시에 확인한 운영 copy session에서만 허용한다. 기본값은 binlog 기록이다.
 - 검증 전 rename, legacy drop, feature flag 기본값 변경을 금지한다.
-- `MASTERY_READ_SOURCE=numeric_v2`로 기동할 때 schema, copy 완료, validated 상태와 sync trigger 3개를 모두 확인하고 하나라도 없으면 backend 시작을 거부한다.
+- `MASTERY_READ_SOURCE=numeric_v2` 또는 `MASTERY_WRITE_SOURCE=numeric_v2`로 기동할 때 schema, copy 완료와 validated 상태를 확인하고 하나라도 없으면 backend 시작을 거부한다. 직접 쓰기 마이그레이션 적용 여부는 일반 schema migration 검증에서 확인한다.
 
 ### 격리 MySQL 측정 결과
 

@@ -11,6 +11,7 @@ import (
 
 	mysql "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
+	"team.gg-server/models"
 )
 
 func TestMasteryNumericShadowMySQL(t *testing.T) {
@@ -233,6 +234,79 @@ func TestMasteryNumericShadowMySQL(t *testing.T) {
 	}
 	if deletedShadowRows != 0 {
 		t.Fatalf("legacy delete was not mirrored: %d shadow rows remain", deletedShadowRows)
+	}
+
+	t.Setenv("MASTERY_WRITE_CUTOVER_OFFLINE_ACK", "true")
+	if err := applyMasteryNumericDirectWrites(ctx, database); err != nil {
+		t.Fatalf("apply mastery direct-write cutover: %v", err)
+	}
+	if ready, err := validateMasteryNumericDirectWrites(ctx, database); err != nil || !ready {
+		t.Fatalf("mastery direct-write cutover is not valid: ready=%t err=%v", ready, err)
+	}
+	t.Cleanup(func() { _ = models.ConfigureMasteryWriteSource(models.MasteryWriteSourceLegacy) })
+	if err := models.ConfigureMasteryWriteSource(models.MasteryWriteSourceNumericV2); err != nil {
+		t.Fatal(err)
+	}
+	puuid := fixtureMasteryPuuid(123)
+	directSnapshot := []*models.MasteryDAO{
+		{Puuid: puuid, ChampionId: 42, ChampionPoints: 987654, ChampionLevel: 7, LastPlayTime: time.Date(2026, 9, 3, 1, 2, 3, 0, time.UTC)},
+		{Puuid: puuid, ChampionId: 44, ChampionPoints: 123456, ChampionLevel: 6, LastPlayTime: time.Date(2026, 9, 2, 1, 2, 3, 0, time.UTC)},
+	}
+	if err := models.ReplaceMasteries(database, puuid, directSnapshot); err != nil {
+		t.Fatalf("replace masteries through numeric direct writes: %v", err)
+	}
+	var legacyCount, numericCount int
+	if err := database.QueryRowxContext(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM masteries WHERE puuid = ?),
+			(SELECT COUNT(*) FROM masteries_numeric_v2 WHERE summoner_fk = 124)
+	`, puuid).Scan(&legacyCount, &numericCount); err != nil {
+		t.Fatal(err)
+	}
+	if legacyCount != 2 || numericCount != 2 {
+		t.Fatalf("direct snapshot was not reconciled: legacy=%d numeric=%d", legacyCount, numericCount)
+	}
+	if _, err := database.ExecContext(ctx, `
+		CREATE TRIGGER fixture_reject_legacy_mastery_update BEFORE UPDATE ON masteries
+		FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'fixture legacy mirror failure'
+	`); err != nil {
+		t.Fatal(err)
+	}
+	directSnapshot[0].ChampionPoints++
+	if err := models.ReplaceMasteries(database, puuid, directSnapshot); err == nil || !strings.Contains(err.Error(), "fixture legacy mirror failure") {
+		t.Fatalf("expected legacy mirror failure, got %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `DROP TRIGGER fixture_reject_legacy_mastery_update`); err != nil {
+		t.Fatal(err)
+	}
+	var rolledBackPoints int
+	if err := database.GetContext(ctx, &rolledBackPoints, `
+		SELECT champion_points FROM masteries_numeric_v2
+		WHERE summoner_fk = 124 AND champion_id = 42
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if rolledBackPoints != 987654 {
+		t.Fatalf("numeric primary write was not rolled back after mirror failure: %d", rolledBackPoints)
+	}
+	if err := models.ConfigureMasteryWriteSource(models.MasteryWriteSourceLegacy); err != nil {
+		t.Fatal(err)
+	}
+	directSnapshot[0].ChampionPoints = 987655
+	if err := models.ReplaceMasteries(database, puuid, directSnapshot); err != nil {
+		t.Fatalf("replace masteries through legacy rollback writes: %v", err)
+	}
+	if err := database.QueryRowxContext(ctx, `
+		SELECT source.champion_points, shadow.champion_points
+		FROM masteries source
+		INNER JOIN masteries_numeric_v2 shadow
+			ON shadow.summoner_fk = 124 AND shadow.champion_id = source.champion_id
+		WHERE source.puuid = ? AND source.champion_id = 42
+	`, puuid).Scan(&sourcePoints, &shadowPoints); err != nil {
+		t.Fatal(err)
+	}
+	if sourcePoints != 987655 || shadowPoints != sourcePoints {
+		t.Fatalf("legacy rollback write was not mirrored: source=%d shadow=%d", sourcePoints, shadowPoints)
 	}
 
 	if _, err := database.ExecContext(ctx, `ANALYZE TABLE masteries, masteries_numeric_v2`); err != nil {

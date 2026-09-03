@@ -1,0 +1,3 @@
+-- The Go migration runner removes the legacy masteries -> numeric_v2 shadow
+-- triggers. The application now writes both stores transactionally and uses
+-- MASTERY_WRITE_SOURCE to select which store is written first.

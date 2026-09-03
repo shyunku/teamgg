@@ -30,7 +30,7 @@
 | 76 | backend | 🔴 TODO | 2026-09-02 16:17 | #66 | 오래된 경기 자동 정리 | 최신 패치 보존 정책을 주기적으로 적용하는 단일 실행 스케줄러를 구현한다. 기본 비활성, 실행 주기·유지 패치 수 설정, dry-run 사전 확인, 백엔드 안전 중단·복구, 디스크·부하·시간 제한, 구조화 결과 로그와 실패 알림을 검증한다. |
 | 75 | backend | 🔴 TODO | 2026-09-02 02:41 | #65, #72, #74 | Legacy 문자열 키 제거 | 숫자 관계 전환과 룬 평탄화가 안정화된 뒤 중복 문자열 FK·인덱스·호환 trigger를 단계적으로 제거한다. 백업·rollback 승인, legacy 의존성 0건, 운영 회귀와 디스크 효과 검증을 완료 조건으로 한다. |
 | 74 | backend | 🔴 TODO | 2026-09-02 02:41 | #73 | Legacy 숙련도 제거 | 기존 `masteries`를 행 수·checksum·복원 절차가 검증된 형태로 백업한 뒤 사용자 승인하에 제거해 약 20~25GiB의 OS 공간을 회수한다. |
-| 73 | backend | 🔴 TODO | 2026-09-02 02:41 | #64 | 숙련도 numeric 직접 쓰기 | 숙련도 쓰기 원본을 `masteries_numeric_v2`로 전환하고 관찰 기간 동안 정합성, rollback 경로, Riot 갱신·DataExplorer·통계 회귀를 검증한다. |
+| 73 | backend | 🟡 WIP | 2026-09-03 16:10 | #64 | 숙련도 numeric 직접 쓰기 | 숙련도 쓰기 원본을 `masteries_numeric_v2`로 전환하고 관찰 기간 동안 정합성, rollback 경로, Riot 갱신·DataExplorer·통계 회귀를 검증한다. |
 | 72 | backend | 🔴 TODO | 2026-09-02 02:41 | #71 | 숫자 관계 읽기 전환 | 백필된 관계에 필수 숫자 인덱스·FK를 적용하고 API·DataExplorer·통계를 숫자 JOIN으로 전환한다. 결과 일치, EXPLAIN·성능, rollback과 운영 회귀를 검증한다. |
 | 71 | backend | 🔴 TODO | 2026-09-02 02:41 | #70 | 하위 관계 숫자 키 백필 | Participant를 참조하는 룬·스탯·밴·팀 등 하위 테이블의 숫자 FK를 제한 배치로 채우고 NULL·고아 참조 0건과 재실행 안전성을 검증한다. |
 | 70 | backend | 🔴 TODO | 2026-09-02 02:41 | #64, #74 | Participant 숫자 키 백필 | `match_participants` 전체의 participant PK, match FK, summoner FK를 재시작 가능한 제한 배치로 완료한다. 정합성, 처리량·binlog·디스크 증가량과 12GiB 안전선을 검증한다. |

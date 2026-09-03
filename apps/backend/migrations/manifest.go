@@ -156,6 +156,12 @@ func migrationDefinitions() []Definition {
 			Apply:    applyDataExplorerClaimIndexes,
 			Validate: validateDataExplorerClaimIndexes,
 		},
+		{
+			Version:  masteryNumericDirectWritesMigrationVersion,
+			FileName: "20260903_enable_mastery_numeric_direct_writes.sql",
+			Apply:    applyMasteryNumericDirectWrites,
+			Validate: validateMasteryNumericDirectWrites,
+		},
 	}
 }
 
