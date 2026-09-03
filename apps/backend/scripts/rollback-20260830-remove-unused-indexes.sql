@@ -5,11 +5,8 @@ ALTER TABLE match_participant_perk_styles
     ALGORITHM=INPLACE,
     LOCK=NONE;
 
-ALTER TABLE masteries
-    ADD INDEX masteries_champion_id_champion_points_index
-        (champion_id ASC, champion_points DESC),
-    ALGORITHM=INPLACE,
-    LOCK=NONE;
+-- The legacy masteries table was retired by 20260903_002. Its removed index
+-- has no rollback action; numeric mastery storage has its own covering index.
 
 ALTER TABLE match_participants
     ADD INDEX match_participants_participant_id_index (participant_id),

@@ -90,4 +90,8 @@ func TestCollectDataExplorerOperationalMetricsUsesEstimatedRowsAndDailyBaseline(
 	if len(database.getQueries) == 0 || strings.Contains(strings.ToUpper(database.getQueries[0]), "COUNT(") {
 		t.Fatal("large table metrics must not use COUNT(*)")
 	}
+	if !strings.Contains(database.getQueries[0], "table_name = 'masteries_numeric_v2'") ||
+		strings.Contains(database.getQueries[0], "table_name = 'masteries'") {
+		t.Fatalf("mastery metrics must use numeric storage: %s", database.getQueries[0])
+	}
 }

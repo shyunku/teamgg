@@ -105,6 +105,7 @@ CREATE TABLE masteries_numeric_v2 (
 - 직접 쓰기 전환 마이그레이션은 backend 중단과 일회성 `MASTERY_WRITE_CUTOVER_OFFLINE_ACK=true`를 요구하며, 기존 legacy→shadow trigger를 제거한다.
 - 문제가 있으면 `MASTERY_READ_SOURCE=legacy`, `MASTERY_WRITE_SOURCE=legacy`로 되돌리고 재시작한다. 양쪽 저장소가 함께 갱신되므로 데이터 복사 없이 롤백할 수 있다.
 - 향후 legacy 제거 단계에서 legacy mirror와 통계 trigger 의존성을 제거한다.
+- `retired` 단계에서는 런타임 읽기·쓰기와 숙련도 통계 trigger를 `masteries_numeric_v2`로 고정하고, 두 개의 일회성 승인값을 요구하는 마이그레이션으로 legacy 테이블을 제거한다. 제거 후 shadow reset은 numeric 운영 원본을 삭제할 수 없도록 거부한다.
 
 ### copy 및 검증
 

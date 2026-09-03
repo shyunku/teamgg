@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"reflect"
 	"strings"
-	"team.gg-server/models"
 	"testing"
 	"time"
 )
@@ -100,7 +99,7 @@ func TestRefreshDirtyMasteryStatisticsAggregatesIsBoundedAndRestartSafe(t *testi
 		}
 	}
 	for _, query := range database.getQueries[1:] {
-		if !strings.Contains(query, "FORCE INDEX (masteries_champion_points_level_covering_index)") ||
+		if !strings.Contains(query, "FORCE INDEX (masteries_numeric_champion_points_level_covering_index)") ||
 			!strings.Contains(query, "WHERE champion_id = ?") {
 			t.Fatalf("aggregate query is not a bounded covering-index scan: %s", query)
 		}
@@ -135,18 +134,13 @@ func TestGetMasteryStatisticsTopRankersUsesBoundedCoveringIndexLookup(t *testing
 	if !strings.Contains(database.selectQueries[0], "FROM mastery_statistics_aggregates") {
 		t.Fatalf("champion key set does not use aggregates: %s", database.selectQueries[0])
 	}
-	if !strings.Contains(database.selectQueries[1], "FORCE INDEX (masteries_champion_points_level_covering_index)") ||
+	if !strings.Contains(database.selectQueries[1], "FORCE INDEX (masteries_numeric_champion_points_level_covering_index)") ||
 		!strings.Contains(database.selectQueries[1], "WHERE m.champion_id = ?") {
 		t.Fatalf("ranker query is not bounded by champion: %s", database.selectQueries[1])
 	}
 }
 
-func TestMasteryStatisticsUsesNumericShadowWhenEnabled(t *testing.T) {
-	if err := models.ConfigureMasteryReadSource(models.MasteryReadSourceNumericV2); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = models.ConfigureMasteryReadSource(models.MasteryReadSourceLegacy) })
-
+func TestMasteryStatisticsUsesNumericStorage(t *testing.T) {
 	database := &masteryStatisticsTestContext{
 		cutoff: time.Now(),
 		dirty:  []int{1},

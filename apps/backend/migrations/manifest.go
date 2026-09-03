@@ -162,6 +162,12 @@ func migrationDefinitions() []Definition {
 			Apply:    applyMasteryNumericDirectWrites,
 			Validate: validateMasteryNumericDirectWrites,
 		},
+		{
+			Version:  masteryLegacyRetirementMigrationVersion,
+			FileName: "20260903_retire_legacy_masteries.sql",
+			Apply:    applyMasteryLegacyRetirement,
+			Validate: validateMasteryLegacyRetirement,
+		},
 	}
 }
 

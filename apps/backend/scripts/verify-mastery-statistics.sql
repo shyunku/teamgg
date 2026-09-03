@@ -7,10 +7,10 @@ SET @champion_id = (
     LIMIT 1
 );
 
-SHOW INDEX FROM masteries
-WHERE Key_name = 'masteries_champion_points_level_covering_index';
+SHOW INDEX FROM masteries_numeric_v2
+WHERE Key_name = 'masteries_numeric_champion_points_level_covering_index';
 
-SELECT trigger_name, event_manipulation, action_timing
+SELECT trigger_name, event_object_table, event_manipulation, action_timing
 FROM information_schema.triggers
 WHERE trigger_schema = DATABASE()
   AND trigger_name IN (
@@ -30,14 +30,15 @@ SELECT
     COALESCE(SUM(champion_points), 0),
     COALESCE(SUM(IF(champion_level >= 7, 1, 0)), 0),
     COUNT(*)
-FROM masteries FORCE INDEX (masteries_champion_points_level_covering_index)
+FROM masteries_numeric_v2 FORCE INDEX (masteries_numeric_champion_points_level_covering_index)
 WHERE champion_id = @champion_id;
 
 EXPLAIN FORMAT=JSON
-SELECT puuid, champion_points
-FROM masteries FORCE INDEX (masteries_champion_points_level_covering_index)
-WHERE champion_id = @champion_id
-ORDER BY champion_points DESC
+SELECT numeric_key.puuid, mastery.champion_points
+FROM masteries_numeric_v2 mastery FORCE INDEX (masteries_numeric_champion_points_level_covering_index)
+INNER JOIN summoner_numeric_keys numeric_key ON numeric_key.summoner_id = mastery.summoner_fk
+WHERE mastery.champion_id = @champion_id
+ORDER BY mastery.champion_points DESC
 LIMIT 30;
 
 SELECT
@@ -62,7 +63,7 @@ JOIN (
         COALESCE(SUM(champion_points), 0) AS total_mastery,
         COALESCE(SUM(IF(champion_level >= 7, 1, 0)), 0) AS mastered_count,
         COUNT(*) AS summoner_count
-    FROM masteries FORCE INDEX (masteries_champion_points_level_covering_index)
+    FROM masteries_numeric_v2 FORCE INDEX (masteries_numeric_champion_points_level_covering_index)
     WHERE champion_id = @champion_id
     GROUP BY champion_id
 ) live ON live.champion_id = aggregate.champion_id

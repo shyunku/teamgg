@@ -32,8 +32,8 @@ team.gg는 League of Legends 전적·통계 조회, 내전 팀 구성 및 밸런
 - 관리자 서버는 team.gg 및 localhost Origin만 허용하고, 내부 백엔드는 Compose 서비스 주소로 접근한다.
 ## 숙련도 통계 집계
 
-- 숙련도 통계는 `masteries` 전체를 주기적으로 그룹화하지 않고 챔피언별 materialized aggregate를 조회한다.
-- `masteries` 변경 트리거는 영향을 받은 챔피언만 dirty queue에 기록하며, 중복 변경은 챔피언당 한 행으로 합쳐진다.
+- 숙련도 통계는 `masteries_numeric_v2` 전체를 주기적으로 그룹화하지 않고 챔피언별 materialized aggregate를 조회한다.
+- `masteries_numeric_v2` 변경 트리거는 영향을 받은 챔피언만 dirty queue에 기록하며, 중복 변경은 챔피언당 한 행으로 합쳐진다.
 - 수집기는 챔피언별 커버링 인덱스 범위 스캔으로 집계를 갱신하고 DB cutoff 이후 발생한 변경을 다음 실행을 위해 보존한다.
 - 최초 마이그레이션은 기존 챔피언을 모두 dirty 상태로 등록해 재시작 가능한 분할 백필을 수행한다.
 - 운영 규모 DB의 정확도·쿼리 계획·실행 시간·잠금 검증을 통과한 뒤 Task #61을 완료 처리한다.

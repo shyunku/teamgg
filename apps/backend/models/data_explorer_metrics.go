@@ -87,7 +87,7 @@ func CollectDataExplorerOperationalMetrics(database db.Context, queueRows int64)
 		SELECT
 			COALESCE(SUM(CASE WHEN table_name = 'summoners' THEN table_rows ELSE 0 END), 0) AS summoner_rows,
 			COALESCE(SUM(CASE WHEN table_name = 'matches' THEN table_rows ELSE 0 END), 0) AS match_rows,
-			COALESCE(SUM(CASE WHEN table_name = 'masteries' THEN table_rows ELSE 0 END), 0) AS mastery_rows,
+			COALESCE(SUM(CASE WHEN table_name = 'masteries_numeric_v2' THEN table_rows ELSE 0 END), 0) AS mastery_rows,
 			COALESCE(SUM(data_length + index_length), 0) AS database_bytes,
 			COALESCE(SUM(data_free), 0) AS database_free_bytes
 		FROM information_schema.tables

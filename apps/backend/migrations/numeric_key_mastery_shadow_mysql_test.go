@@ -243,10 +243,6 @@ func TestMasteryNumericShadowMySQL(t *testing.T) {
 	if ready, err := validateMasteryNumericDirectWrites(ctx, database); err != nil || !ready {
 		t.Fatalf("mastery direct-write cutover is not valid: ready=%t err=%v", ready, err)
 	}
-	t.Cleanup(func() { _ = models.ConfigureMasteryWriteSource(models.MasteryWriteSourceLegacy) })
-	if err := models.ConfigureMasteryWriteSource(models.MasteryWriteSourceNumericV2); err != nil {
-		t.Fatal(err)
-	}
 	puuid := fixtureMasteryPuuid(123)
 	directSnapshot := []*models.MasteryDAO{
 		{Puuid: puuid, ChampionId: 42, ChampionPoints: 987654, ChampionLevel: 7, LastPlayTime: time.Date(2026, 9, 3, 1, 2, 3, 0, time.UTC)},
@@ -263,50 +259,8 @@ func TestMasteryNumericShadowMySQL(t *testing.T) {
 	`, puuid).Scan(&legacyCount, &numericCount); err != nil {
 		t.Fatal(err)
 	}
-	if legacyCount != 2 || numericCount != 2 {
-		t.Fatalf("direct snapshot was not reconciled: legacy=%d numeric=%d", legacyCount, numericCount)
-	}
-	if _, err := database.ExecContext(ctx, `
-		CREATE TRIGGER fixture_reject_legacy_mastery_update BEFORE UPDATE ON masteries
-		FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'fixture legacy mirror failure'
-	`); err != nil {
-		t.Fatal(err)
-	}
-	directSnapshot[0].ChampionPoints++
-	if err := models.ReplaceMasteries(database, puuid, directSnapshot); err == nil || !strings.Contains(err.Error(), "fixture legacy mirror failure") {
-		t.Fatalf("expected legacy mirror failure, got %v", err)
-	}
-	if _, err := database.ExecContext(ctx, `DROP TRIGGER fixture_reject_legacy_mastery_update`); err != nil {
-		t.Fatal(err)
-	}
-	var rolledBackPoints int
-	if err := database.GetContext(ctx, &rolledBackPoints, `
-		SELECT champion_points FROM masteries_numeric_v2
-		WHERE summoner_fk = 124 AND champion_id = 42
-	`); err != nil {
-		t.Fatal(err)
-	}
-	if rolledBackPoints != 987654 {
-		t.Fatalf("numeric primary write was not rolled back after mirror failure: %d", rolledBackPoints)
-	}
-	if err := models.ConfigureMasteryWriteSource(models.MasteryWriteSourceLegacy); err != nil {
-		t.Fatal(err)
-	}
-	directSnapshot[0].ChampionPoints = 987655
-	if err := models.ReplaceMasteries(database, puuid, directSnapshot); err != nil {
-		t.Fatalf("replace masteries through legacy rollback writes: %v", err)
-	}
-	if err := database.QueryRowxContext(ctx, `
-		SELECT source.champion_points, shadow.champion_points
-		FROM masteries source
-		INNER JOIN masteries_numeric_v2 shadow
-			ON shadow.summoner_fk = 124 AND shadow.champion_id = source.champion_id
-		WHERE source.puuid = ? AND source.champion_id = 42
-	`, puuid).Scan(&sourcePoints, &shadowPoints); err != nil {
-		t.Fatal(err)
-	}
-	if sourcePoints != 987655 || shadowPoints != sourcePoints {
-		t.Fatalf("legacy rollback write was not mirrored: source=%d shadow=%d", sourcePoints, shadowPoints)
+	if legacyCount != 99 || numericCount != 2 {
+		t.Fatalf("numeric direct snapshot changed legacy storage: legacy=%d numeric=%d", legacyCount, numericCount)
 	}
 
 	if _, err := database.ExecContext(ctx, `ANALYZE TABLE masteries, masteries_numeric_v2`); err != nil {
@@ -352,6 +306,92 @@ func TestMasteryNumericShadowMySQL(t *testing.T) {
 	}
 	if shadowTables != 0 || progressRows != 0 {
 		t.Fatalf("mastery shadow reset is incomplete: tables=%d progress=%d", shadowTables, progressRows)
+	}
+}
+
+func TestMasteryLegacyRetirementMySQL(t *testing.T) {
+	dsn := os.Getenv("TEAMGG_NUMERIC_KEY_MYSQL_TEST_DSN")
+	if dsn == "" {
+		t.Skip("TEAMGG_NUMERIC_KEY_MYSQL_TEST_DSN is not set")
+	}
+	config, err := mysql.ParseDSN(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.ParseTime = true
+	config.MultiStatements = true
+	config.DBName = ""
+
+	ctx := context.Background()
+	admin, err := sqlx.Open("mysql", config.FormatDSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	if err := pingNumericKeyTestDatabase(ctx, admin, 30*time.Second); err != nil {
+		t.Fatal(err)
+	}
+
+	databaseName := fmt.Sprintf("teamgg_mastery_retirement_test_%d", time.Now().UnixNano())
+	if _, err := admin.ExecContext(ctx, "CREATE DATABASE `"+databaseName+"`"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = admin.ExecContext(context.Background(), "DROP DATABASE IF EXISTS `"+databaseName+"`") })
+	config.DBName = databaseName
+	database, err := sqlx.Open("mysql", config.FormatDSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	createMasteryNumericShadowFixture(t, ctx, database, 10)
+	if err := applyMasteryStatisticsAggregates(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+	result, err := PrepareMasteryNumericShadow(ctx, database, MasteryNumericShadowOptions{
+		BatchSize:           1000,
+		WorkLimit:           time.Minute,
+		OfflineAcknowledged: true,
+	})
+	if err != nil || !result.Validated {
+		t.Fatalf("prepare numeric mastery storage: result=%+v err=%v", result, err)
+	}
+	t.Setenv("MASTERY_WRITE_CUTOVER_OFFLINE_ACK", "true")
+	if err := applyMasteryNumericDirectWrites(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MASTERY_LEGACY_DROP_OFFLINE_ACK", "true")
+	t.Setenv("MASTERY_LEGACY_DROP_ACK", "true")
+	if err := applyMasteryLegacyRetirement(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+	if ready, err := validateMasteryLegacyRetirement(ctx, database); err != nil || !ready {
+		t.Fatalf("legacy mastery retirement is invalid: ready=%t err=%v", ready, err)
+	}
+	if err := ResetMasteryNumericShadow(ctx, database, true, true); err == nil || !strings.Contains(err.Error(), "refusing to drop primary numeric mastery storage") {
+		t.Fatalf("retired numeric storage reset was not rejected: %v", err)
+	}
+
+	puuid := fixtureMasteryPuuid(1)
+	if err := models.ReplaceMasteries(database, puuid, []*models.MasteryDAO{{
+		Puuid: puuid, ChampionId: 99, ChampionPoints: 999999, ChampionLevel: 7,
+		LastPlayTime: time.Date(2026, 9, 3, 1, 2, 3, 0, time.UTC),
+	}}); err != nil {
+		t.Fatalf("write mastery after legacy retirement: %v", err)
+	}
+	var masteryRows, dirtyRows int
+	if err := database.GetContext(ctx, &masteryRows, `
+		SELECT COUNT(*) FROM masteries_numeric_v2 WHERE summoner_fk = 2 AND champion_id = 99
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.GetContext(ctx, &dirtyRows, `
+		SELECT COUNT(*) FROM mastery_statistics_dirty_champions WHERE champion_id = 99
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if masteryRows != 1 || dirtyRows != 1 {
+		t.Fatalf("numeric mastery write or statistics trigger failed: mastery=%d dirty=%d", masteryRows, dirtyRows)
 	}
 }
 

@@ -28,37 +28,7 @@ func (m *MasteryDAO) Upsert(db db.Context) error {
 	if !m.SummonerFk.Valid {
 		return errors.New("mastery numeric summoner key is required")
 	}
-	if MasteryNumericV2WritesEnabled() {
-		if err := m.upsertNumeric(db); err != nil {
-			return err
-		}
-		return m.upsertLegacy(db)
-	}
-	if err := m.upsertLegacy(db); err != nil {
-		return err
-	}
 	return m.upsertNumeric(db)
-}
-
-func (m *MasteryDAO) upsertLegacy(database db.Context) error {
-	_, err := database.Exec(`
-		INSERT INTO masteries
-		    (puuid, summoner_fk, champion_points_until_next_level, chest_granted, champion_id, last_play_time, champion_level, champion_points, champion_points_since_last_level, tokens_earned)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON DUPLICATE KEY UPDATE 
-			summoner_fk = VALUES(summoner_fk),
-			champion_points_until_next_level = VALUES(champion_points_until_next_level),
-			chest_granted = VALUES(chest_granted),
-			last_play_time = VALUES(last_play_time),
-			champion_level = VALUES(champion_level),
-			champion_points = VALUES(champion_points),
-			champion_points_since_last_level = VALUES(champion_points_since_last_level),
-			tokens_earned = VALUES(tokens_earned)`,
-		m.Puuid, m.SummonerFk, m.ChampionPointsUntilNextLevel, m.ChestGranted,
-		m.ChampionId, m.LastPlayTime, m.ChampionLevel, m.ChampionPoints,
-		m.ChampionPointsSinceLastLevel, m.TokensEarned,
-	)
-	return err
 }
 
 func (m *MasteryDAO) upsertNumeric(database db.Context) error {
@@ -85,8 +55,8 @@ type masteryTransactionStarter interface {
 	BeginTxx(context.Context, *sql.TxOptions) (*sqlx.Tx, error)
 }
 
-// ReplaceMasteries writes a complete Riot mastery snapshot to the configured
-// primary store and mirrors it to the rollback store in the same transaction.
+// ReplaceMasteries writes a complete Riot mastery snapshot to numeric storage
+// and removes rows that are no longer returned by Riot in one transaction.
 func ReplaceMasteries(database db.Context, puuid string, masteries []*MasteryDAO) error {
 	if starter, ok := database.(masteryTransactionStarter); ok {
 		tx, err := starter.BeginTxx(context.Background(), nil)
@@ -130,69 +100,39 @@ func replaceMasteries(database db.Context, puuid string, masteries []*MasteryDAO
 		championIds = append(championIds, mastery.ChampionId)
 	}
 
-	return deleteStaleMasteries(database, puuid, summonerFk, championIds)
+	return deleteStaleMasteries(database, summonerFk, championIds)
 }
 
-func deleteStaleMasteries(database db.Context, puuid string, summonerFk int64, championIds []int64) error {
-	legacyQuery := "DELETE FROM masteries WHERE puuid = ?"
+func deleteStaleMasteries(database db.Context, summonerFk int64, championIds []int64) error {
 	numericQuery := "DELETE FROM masteries_numeric_v2 WHERE summoner_fk = ?"
-	legacyArgs := []interface{}{puuid}
 	numericArgs := []interface{}{summonerFk}
 	if len(championIds) > 0 {
 		placeholders := "?"
 		for index := 1; index < len(championIds); index++ {
 			placeholders += ", ?"
 		}
-		legacyQuery += " AND champion_id NOT IN (" + placeholders + ")"
 		numericQuery += " AND champion_id NOT IN (" + placeholders + ")"
 		for _, championId := range championIds {
-			legacyArgs = append(legacyArgs, championId)
 			numericArgs = append(numericArgs, championId)
 		}
 	}
-
-	deleteLegacy := func() error {
-		_, err := database.Exec(legacyQuery, legacyArgs...)
-		return err
-	}
-	deleteNumeric := func() error {
-		_, err := database.Exec(numericQuery, numericArgs...)
-		return err
-	}
-	if MasteryNumericV2WritesEnabled() {
-		if err := deleteNumeric(); err != nil {
-			return err
-		}
-		return deleteLegacy()
-	}
-	if err := deleteLegacy(); err != nil {
-		return err
-	}
-	return deleteNumeric()
+	_, err := database.Exec(numericQuery, numericArgs...)
+	return err
 }
 
 func GetMasteryDAOs(db db.Context, puuid string) ([]*MasteryDAO, error) {
 	var masteries []*MasteryDAO
 	query := `
-		SELECT puuid, summoner_fk, champion_points_until_next_level,
-			chest_granted, champion_id, last_play_time, champion_level,
-			champion_points, champion_points_since_last_level, tokens_earned
-		FROM masteries
-		WHERE puuid = ?
+		SELECT numeric_key.puuid, mastery.summoner_fk,
+			mastery.champion_points_until_next_level, mastery.chest_granted,
+			mastery.champion_id, mastery.last_play_time, mastery.champion_level,
+			mastery.champion_points, mastery.champion_points_since_last_level,
+			mastery.tokens_earned
+		FROM summoner_numeric_keys numeric_key
+		INNER JOIN masteries_numeric_v2 mastery
+			ON mastery.summoner_fk = numeric_key.summoner_id
+		WHERE numeric_key.puuid = ?
 	`
-	if MasteryNumericV2ReadsEnabled() {
-		query = `
-			SELECT numeric_key.puuid, mastery.summoner_fk,
-				mastery.champion_points_until_next_level, mastery.chest_granted,
-				mastery.champion_id, mastery.last_play_time, mastery.champion_level,
-				mastery.champion_points, mastery.champion_points_since_last_level,
-				mastery.tokens_earned
-			FROM summoner_numeric_keys numeric_key
-			INNER JOIN masteries_numeric_v2 mastery
-				ON mastery.summoner_fk = numeric_key.summoner_id
-			WHERE numeric_key.puuid = ?
-		`
-	}
 	if err := db.Select(&masteries, query, puuid); err != nil {
 		return nil, err
 	}

@@ -15,6 +15,13 @@ const (
 	masteryStatisticsDeleteTrigger = "teamgg_masteries_statistics_delete"
 )
 
+type masteryStatisticsTrigger struct {
+	name      string
+	timing    string
+	event     string
+	statement string
+}
+
 func applyMasteryStatisticsAggregates(ctx context.Context, database *sqlx.DB) error {
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS mastery_statistics_aggregates (
@@ -43,35 +50,8 @@ func applyMasteryStatisticsAggregates(ctx context.Context, database *sqlx.DB) er
 		return fmt.Errorf("ensure mastery statistics covering index: %w", err)
 	}
 
-	triggers := []struct {
-		name, timing, event, statement string
-	}{
-		{
-			masteryStatisticsInsertTrigger, "AFTER", "INSERT",
-			fmt.Sprintf(`CREATE TRIGGER %s AFTER INSERT ON masteries FOR EACH ROW
-				INSERT INTO mastery_statistics_dirty_champions (champion_id, dirty_at)
-				VALUES (NEW.champion_id, NOW(6))
-				ON DUPLICATE KEY UPDATE dirty_at = VALUES(dirty_at)`, masteryStatisticsInsertTrigger),
-		},
-		{
-			masteryStatisticsUpdateTrigger, "AFTER", "UPDATE",
-			fmt.Sprintf(`CREATE TRIGGER %s AFTER UPDATE ON masteries FOR EACH ROW
-				INSERT INTO mastery_statistics_dirty_champions (champion_id, dirty_at)
-				SELECT NEW.champion_id, NOW(6) FROM DUAL
-				WHERE NOT (OLD.champion_points <=> NEW.champion_points)
-				   OR NOT (OLD.champion_level <=> NEW.champion_level)
-				ON DUPLICATE KEY UPDATE dirty_at = VALUES(dirty_at)`, masteryStatisticsUpdateTrigger),
-		},
-		{
-			masteryStatisticsDeleteTrigger, "AFTER", "DELETE",
-			fmt.Sprintf(`CREATE TRIGGER %s AFTER DELETE ON masteries FOR EACH ROW
-				INSERT INTO mastery_statistics_dirty_champions (champion_id, dirty_at)
-				VALUES (OLD.champion_id, NOW(6))
-				ON DUPLICATE KEY UPDATE dirty_at = VALUES(dirty_at)`, masteryStatisticsDeleteTrigger),
-		},
-	}
-	for _, trigger := range triggers {
-		if err := ensureMasteryStatisticsTrigger(ctx, database, trigger.name, trigger.timing, trigger.event, trigger.statement); err != nil {
+	for _, trigger := range masteryStatisticsTriggers("masteries") {
+		if err := ensureMasteryStatisticsTrigger(ctx, database, "masteries", trigger.name, trigger.timing, trigger.event, trigger.statement); err != nil {
 			return err
 		}
 	}
@@ -82,6 +62,34 @@ func applyMasteryStatisticsAggregates(ctx context.Context, database *sqlx.DB) er
 		ON DUPLICATE KEY UPDATE dirty_at = LEAST(dirty_at, VALUES(dirty_at))
 	`)
 	return err
+}
+
+func masteryStatisticsTriggers(table string) []masteryStatisticsTrigger {
+	return []masteryStatisticsTrigger{
+		{
+			masteryStatisticsInsertTrigger, "AFTER", "INSERT",
+			fmt.Sprintf(`CREATE TRIGGER %s AFTER INSERT ON %s FOR EACH ROW
+				INSERT INTO mastery_statistics_dirty_champions (champion_id, dirty_at)
+				VALUES (NEW.champion_id, NOW(6))
+				ON DUPLICATE KEY UPDATE dirty_at = VALUES(dirty_at)`, masteryStatisticsInsertTrigger, table),
+		},
+		{
+			masteryStatisticsUpdateTrigger, "AFTER", "UPDATE",
+			fmt.Sprintf(`CREATE TRIGGER %s AFTER UPDATE ON %s FOR EACH ROW
+				INSERT INTO mastery_statistics_dirty_champions (champion_id, dirty_at)
+				SELECT NEW.champion_id, NOW(6) FROM DUAL
+				WHERE NOT (OLD.champion_points <=> NEW.champion_points)
+				   OR NOT (OLD.champion_level <=> NEW.champion_level)
+				ON DUPLICATE KEY UPDATE dirty_at = VALUES(dirty_at)`, masteryStatisticsUpdateTrigger, table),
+		},
+		{
+			masteryStatisticsDeleteTrigger, "AFTER", "DELETE",
+			fmt.Sprintf(`CREATE TRIGGER %s AFTER DELETE ON %s FOR EACH ROW
+				INSERT INTO mastery_statistics_dirty_champions (champion_id, dirty_at)
+				VALUES (OLD.champion_id, NOW(6))
+				ON DUPLICATE KEY UPDATE dirty_at = VALUES(dirty_at)`, masteryStatisticsDeleteTrigger, table),
+		},
+	}
 }
 
 func ensureMasteryStatisticsCoveringIndex(ctx context.Context, database *sqlx.DB) error {
@@ -115,7 +123,7 @@ func ensureMasteryStatisticsCoveringIndex(ctx context.Context, database *sqlx.DB
 	return err
 }
 
-func ensureMasteryStatisticsTrigger(ctx context.Context, database *sqlx.DB, name, timing, event, statement string) error {
+func ensureMasteryStatisticsTrigger(ctx context.Context, database *sqlx.DB, table, name, timing, event, statement string) error {
 	var existing struct {
 		Table  string
 		Timing string
@@ -130,7 +138,7 @@ func ensureMasteryStatisticsTrigger(ctx context.Context, database *sqlx.DB, name
 		WHERE trigger_schema = DATABASE() AND trigger_name = ?
 	`, name).Scan(&existing.Table, &existing.Timing, &existing.Event)
 	if err == nil {
-		if existing.Table == "masteries" && existing.Timing == timing && existing.Event == event {
+		if existing.Table == table && existing.Timing == timing && existing.Event == event {
 			return nil
 		}
 		return fmt.Errorf("trigger %s exists with an unexpected definition", name)
@@ -149,24 +157,25 @@ func validateMasteryStatisticsAggregates(ctx context.Context, database *sqlx.DB)
 	if err != nil || !tables {
 		return false, err
 	}
-	index, err := indexMatches(
-		ctx,
-		database,
-		"masteries",
-		masteryStatisticsCoveringIndex,
-		"champion_id",
-		"champion_points",
-		"champion_level",
-	)
+	legacy, err := validateMasteryStatisticsStorage(ctx, database, "masteries", masteryStatisticsCoveringIndex)
+	if err != nil || legacy {
+		return legacy, err
+	}
+	return validateMasteryStatisticsStorage(ctx, database, "masteries_numeric_v2", "masteries_numeric_champion_points_level_covering_index")
+}
+
+func validateMasteryStatisticsStorage(ctx context.Context, database *sqlx.DB, table, indexName string) (bool, error) {
+	index, err := indexMatches(ctx, database, table, indexName, "champion_id", "champion_points", "champion_level")
 	if err != nil || !index {
 		return false, err
 	}
-	for _, name := range []string{masteryStatisticsInsertTrigger, masteryStatisticsUpdateTrigger, masteryStatisticsDeleteTrigger} {
+	for _, trigger := range masteryStatisticsTriggers(table) {
 		var count int
 		if err := database.GetContext(ctx, &count, `
 			SELECT COUNT(*) FROM information_schema.triggers
-			WHERE trigger_schema = DATABASE() AND trigger_name = ? AND event_object_table = 'masteries'
-		`, name); err != nil {
+			WHERE trigger_schema = DATABASE() AND trigger_name = ?
+			  AND event_object_table = ? AND action_timing = ? AND event_manipulation = ?
+		`, trigger.name, table, trigger.timing, trigger.event); err != nil {
 			return false, err
 		}
 		if count != 1 {
@@ -174,4 +183,23 @@ func validateMasteryStatisticsAggregates(ctx context.Context, database *sqlx.DB)
 		}
 	}
 	return true, nil
+}
+
+func switchMasteryStatisticsToNumeric(ctx context.Context, database *sqlx.DB) error {
+	valid, err := indexMatches(ctx, database, "masteries_numeric_v2", "masteries_numeric_champion_points_level_covering_index", "champion_id", "champion_points", "champion_level")
+	if err != nil {
+		return err
+	}
+	if !valid {
+		return fmt.Errorf("masteries_numeric_v2 covering index is not ready")
+	}
+	for _, trigger := range masteryStatisticsTriggers("masteries_numeric_v2") {
+		if _, err := database.ExecContext(ctx, "DROP TRIGGER IF EXISTS `"+trigger.name+"`"); err != nil {
+			return fmt.Errorf("drop legacy mastery statistics trigger %s: %w", trigger.name, err)
+		}
+		if _, err := database.ExecContext(ctx, trigger.statement); err != nil {
+			return fmt.Errorf("create numeric mastery statistics trigger %s: %w", trigger.name, err)
+		}
+	}
+	return nil
 }

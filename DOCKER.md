@@ -118,6 +118,10 @@ The 35-million-row `masteries` table is intentionally excluded from in-place
 numeric-key updates. After stopping backend writes, prepare its compact numeric
 shadow with the explicit maintenance command:
 
+> These shadow preparation/reset commands are only for the pre-retirement
+> migration. After `20260903_002` removes legacy `masteries`, do not run them;
+> the backend also rejects reset attempts to protect primary numeric storage.
+
 ```bash
 docker compose stop backend
 docker compose run --rm \
@@ -180,11 +184,25 @@ MASTERY_READ_SOURCE=numeric_v2
 MASTERY_WRITE_SOURCE=numeric_v2
 ```
 
-The application writes `numeric_v2` first and mirrors legacy in the same
-transaction during the observation period. Set both values back to `legacy`
-and recreate the backend for an immediate rollback; the numeric table also
-continues to receive a transactional mirror. Do not remove legacy `masteries`
-until the separate retirement task is approved.
+The transitional application writes `numeric_v2` first and mirrors legacy in
+the same transaction during the observation period. After that observation is
+complete and legacy removal is explicitly approved, deploy the retirement
+version, stop the backend, and apply the destructive migration:
+
+```bash
+docker compose stop backend
+docker compose run --rm \
+  -e MASTERY_LEGACY_DROP_OFFLINE_ACK=true \
+  -e MASTERY_LEGACY_DROP_ACK=true \
+  backend migrate
+docker compose up -d --force-recreate backend
+```
+
+Never persist either acknowledgement as `true`. After migration
+`20260903_002`, the runtime always uses `masteries_numeric_v2`; the old
+`MASTERY_READ_SOURCE` and `MASTERY_WRITE_SOURCE` settings are ignored and may
+be removed from the environment file. The legacy table and its rollback path
+no longer exist.
 
 `MASTERY_NUMERIC_SHADOW_DISABLE_BINLOG` defaults to `false`. Set it to `true`
 only after confirming there are no replicas and explicitly accepting that the

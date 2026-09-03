@@ -1,0 +1,3 @@
+-- The Go migration runner moves mastery statistics triggers to
+-- masteries_numeric_v2 and drops legacy masteries only with explicit offline
+-- and destructive-action acknowledgements.

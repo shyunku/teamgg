@@ -127,6 +127,13 @@ func PrepareMasteryNumericShadow(
 	if !options.OfflineAcknowledged {
 		return result, errors.New("mastery numeric shadow requires MASTERY_NUMERIC_SHADOW_OFFLINE_ACK=true after backend writes are stopped")
 	}
+	legacyExists, err := tableExists(ctx, database, "masteries")
+	if err != nil {
+		return result, err
+	}
+	if !legacyExists {
+		return result, errors.New("legacy masteries has been retired; numeric storage cannot be rebuilt with the shadow command")
+	}
 	if options.BatchSize < 100 || options.BatchSize > 100000 {
 		options.BatchSize = 10000
 	}
@@ -271,6 +278,13 @@ func PrepareMasteryNumericShadow(
 func ResetMasteryNumericShadow(ctx context.Context, database *sqlx.DB, offlineAcknowledged, resetAcknowledged bool) error {
 	if !offlineAcknowledged || !resetAcknowledged {
 		return errors.New("reset mastery numeric shadow requires MASTERY_NUMERIC_SHADOW_OFFLINE_ACK=true and MASTERY_NUMERIC_SHADOW_RESET_ACK=true")
+	}
+	legacyExists, err := tableExists(ctx, database, "masteries")
+	if err != nil {
+		return err
+	}
+	if !legacyExists {
+		return errors.New("legacy masteries has been retired; refusing to drop primary numeric mastery storage")
 	}
 	connection, err := database.Connx(ctx)
 	if err != nil {
@@ -783,7 +797,7 @@ func masteryNumericShadowReady(ctx context.Context, database *sqlx.DB) (bool, er
 	if !progress.CopyCompleted || !progress.Validated {
 		return false, nil
 	}
-	if err := ValidateMasteryNumericShadowCutover(ctx, database); err != nil {
+	if err := ValidateMasteryNumericStorage(ctx, database); err != nil {
 		return false, nil
 	}
 	return true, nil

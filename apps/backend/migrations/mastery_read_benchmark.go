@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -152,6 +153,13 @@ const numericMasteryTopRankersQuery = `
 
 func BenchmarkMasteryReads(ctx context.Context, database *sqlx.DB, options MasteryReadBenchmarkOptions) (MasteryReadBenchmarkResult, error) {
 	result := MasteryReadBenchmarkResult{}
+	legacyExists, err := tableExists(ctx, database, "masteries")
+	if err != nil {
+		return result, err
+	}
+	if !legacyExists {
+		return result, errors.New("legacy masteries has been retired; comparative read benchmark is no longer available")
+	}
 	options.SummonerSamples = boundedMasteryBenchmarkOption(strconv.Itoa(options.SummonerSamples), defaultMasteryBenchmarkSummoners, 1, 100)
 	options.ChampionSamples = boundedMasteryBenchmarkOption(strconv.Itoa(options.ChampionSamples), defaultMasteryBenchmarkChampions, 1, 100)
 	options.Iterations = boundedMasteryBenchmarkOption(strconv.Itoa(options.Iterations), defaultMasteryBenchmarkIterations, 1, 20)

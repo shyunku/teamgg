@@ -149,10 +149,17 @@ func matchChildTrigger(table, name, event, condition string) numericKeyTrigger {
 }
 
 func validateNumericKeyChildren(ctx context.Context, database *sqlx.DB) (bool, error) {
+	legacyMasteriesExist, err := tableExists(ctx, database, "masteries")
+	if err != nil {
+		return false, err
+	}
 	columns := map[string][]string{
 		"numeric_key_child_backfill_progress": {"entity_name", "cursor_text", "cursor_text_2", "processed_rows", "completed"},
 	}
 	for _, column := range numericKeyChildColumns {
+		if column.table == "masteries" && !legacyMasteriesExist {
+			continue
+		}
 		columns[column.table] = append(columns[column.table], column.column)
 	}
 	valid, err := columnsExist(ctx, database, columns)
@@ -164,6 +171,9 @@ func validateNumericKeyChildren(ctx context.Context, database *sqlx.DB) (bool, e
 		return false, err
 	}
 	for _, trigger := range numericKeyChildTriggers() {
+		if !legacyMasteriesExist && (trigger.name == "masteries_numeric_key_bi" || trigger.name == "masteries_numeric_key_bu") {
+			continue
+		}
 		var count int
 		if err := database.GetContext(ctx, &count, `
 			SELECT COUNT(*) FROM information_schema.triggers
