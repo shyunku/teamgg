@@ -42,7 +42,7 @@ func TestMasteryNumericShadowMySQL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer admin.Close()
+	t.Cleanup(func() { _ = admin.Close() })
 	if err := pingNumericKeyTestDatabase(ctx, admin, 30*time.Second); err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func TestMasteryLegacyRetirementMySQL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer admin.Close()
+	t.Cleanup(func() { _ = admin.Close() })
 	if err := pingNumericKeyTestDatabase(ctx, admin, 30*time.Second); err != nil {
 		t.Fatal(err)
 	}
