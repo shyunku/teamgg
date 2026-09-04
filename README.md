@@ -32,3 +32,7 @@ When the frontend is hosted on Amazon S3, start the three server services.
 ```powershell
 docker compose up -d --build backend replay-analyzer admin
 ```
+
+## License
+
+team.gg is licensed under the [GNU General Public License v3.0](./LICENSE) (`GPL-3.0-only`).
