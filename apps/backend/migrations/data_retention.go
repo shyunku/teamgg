@@ -26,6 +26,9 @@ type DataRetentionOptions struct {
 	DryRun              bool
 	DeleteAcknowledged  bool
 	OfflineAcknowledged bool
+	EnforceLoadGuard    bool
+	MaxThreadsRunning   int
+	MaxLockWaits        int
 	RetainedPatches     int
 	BatchSize           int
 	BatchTimeout        time.Duration
@@ -148,6 +151,9 @@ func DataRetentionOptionsFromEnvironment() DataRetentionOptions {
 		DryRun:              retentionEnvBool("DATA_RETENTION_DRY_RUN", true),
 		DeleteAcknowledged:  retentionEnvBool("DATA_RETENTION_DELETE_ACK", false),
 		OfflineAcknowledged: retentionEnvBool("DATA_RETENTION_OFFLINE_ACK", false),
+		EnforceLoadGuard:    retentionEnvBool("DATA_RETENTION_ENFORCE_LOAD_GUARD", false),
+		MaxThreadsRunning:   retentionEnvInt("DATA_RETENTION_MAX_THREADS_RUNNING", 4, 1, 100),
+		MaxLockWaits:        retentionEnvInt("DATA_RETENTION_MAX_LOCK_WAITS", 0, 0, 100),
 		RetainedPatches:     retentionEnvInt("DATA_RETENTION_MATCH_PATCHES", defaultRetentionMatchPatches, 3, 30),
 		BatchSize:           retentionEnvInt("DATA_RETENTION_BATCH_SIZE", defaultRetentionBatchSize, 10, 1000),
 		BatchTimeout:        retentionEnvDuration("DATA_RETENTION_BATCH_TIMEOUT", defaultRetentionBatchTimeout, 10*time.Second, 15*time.Minute),
@@ -211,6 +217,11 @@ func CleanupRetainedData(ctx context.Context, database *sqlx.DB, options DataRet
 	if options.WorkLimit < time.Second || options.WorkLimit > time.Hour {
 		options.WorkLimit = defaultRetentionWorkLimit
 	}
+	if options.EnforceLoadGuard {
+		if err := validateRetentionDatabaseLoad(ctx, database, options); err != nil {
+			return result, err
+		}
+	}
 
 	versions, err := loadRetentionMatchVersions(ctx, database)
 	if err != nil {
@@ -230,9 +241,28 @@ func CleanupRetainedData(ctx context.Context, database *sqlx.DB, options DataRet
 		return result, err
 	}
 	defer connection.Close()
+	var lockAcquired int
+	if err := connection.GetContext(ctx, &lockAcquired, `SELECT GET_LOCK('teamgg-retention-cleanup', 0)`); err != nil {
+		return result, fmt.Errorf("acquire retention cleanup lock: %w", err)
+	}
+	if lockAcquired != 1 {
+		return result, errors.New("another retention cleanup is already running")
+	}
+	defer func() {
+		var released int
+		if err := connection.GetContext(context.Background(), &released, `SELECT RELEASE_LOCK('teamgg-retention-cleanup')`); err != nil {
+			returnedErr = errors.Join(returnedErr, fmt.Errorf("release retention cleanup lock: %w", err))
+		}
+	}()
 	deadline := time.Now().Add(options.WorkLimit)
 	for time.Now().Before(deadline) {
 		batchContext, cancel := context.WithTimeout(ctx, options.BatchTimeout)
+		if options.EnforceLoadGuard {
+			if err := validateRetentionDatabaseLoad(batchContext, connection, options); err != nil {
+				cancel()
+				return result, err
+			}
+		}
 		matchIDs, selectErr := selectRetentionMatchBatch(batchContext, connection, result.ExpiredVersions, options.BatchSize)
 		if selectErr != nil {
 			cancel()
@@ -272,6 +302,35 @@ func CleanupRetainedData(ctx context.Context, database *sqlx.DB, options DataRet
 		}
 	}
 	return result, nil
+}
+
+type retentionLoadQueryer interface {
+	GetContext(context.Context, interface{}, string, ...interface{}) error
+}
+
+func validateRetentionDatabaseLoad(ctx context.Context, database retentionLoadQueryer, options DataRetentionOptions) error {
+	var status struct {
+		Name  string `db:"Variable_name"`
+		Value string `db:"Value"`
+	}
+	if err := database.GetContext(ctx, &status, `SHOW GLOBAL STATUS LIKE 'Threads_running'`); err != nil {
+		return fmt.Errorf("read retention database running threads: %w", err)
+	}
+	threads, err := strconv.Atoi(status.Value)
+	if err != nil {
+		return fmt.Errorf("invalid retention database running threads %q: %w", status.Value, err)
+	}
+	if threads > options.MaxThreadsRunning {
+		return fmt.Errorf("retention database load exceeds limit: threadsRunning=%d limit=%d", threads, options.MaxThreadsRunning)
+	}
+	var lockWaits int
+	if err := database.GetContext(ctx, &lockWaits, `SELECT COUNT(*) FROM performance_schema.data_lock_waits`); err != nil {
+		return fmt.Errorf("read retention database lock waits: %w", err)
+	}
+	if lockWaits > options.MaxLockWaits {
+		return fmt.Errorf("retention database lock waits exceed limit: lockWaits=%d limit=%d", lockWaits, options.MaxLockWaits)
+	}
+	return nil
 }
 
 func loadRetentionMatchVersions(ctx context.Context, database *sqlx.DB) ([]retentionVersionRow, error) {

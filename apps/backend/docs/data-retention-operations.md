@@ -22,6 +22,9 @@ DATA_RETENTION_MATCH_PATCHES=8
 DATA_RETENTION_BATCH_SIZE=100
 DATA_RETENTION_BATCH_TIMEOUT=2m
 DATA_RETENTION_WORK_LIMIT=10m
+DATA_RETENTION_ENFORCE_LOAD_GUARD=false
+DATA_RETENTION_MAX_THREADS_RUNNING=4
+DATA_RETENTION_MAX_LOCK_WAITS=0
 ```
 
 Actual deletion is rejected unless dry-run is disabled and both acknowledgements are true. Stop backend writes before acknowledging offline mode.
@@ -60,6 +63,20 @@ The command can stop at its work limit and be rerun. Deleted rows are gone, so t
 Each batch is one transaction and uses `binlog_row_image=MINIMAL`. Any statement failure rolls back the current batch.
 
 Numeric match and participant identity mappings are retained. They are migration infrastructure rather than raw match payload, and preserving them lets a later re-fetch reuse the same numeric IDs while participant backfill and read cutover remain incomplete.
+
+## Optional host scheduler (#76)
+
+The host-side scheduler is disabled by default. It runs the existing cleanup command, not a second deletion implementation. It needs Python 3.9+ on the Linux Docker host. Copy [the configuration template](../../../.env.retention.example) to the ignored root `.env.retention` and set the host path containing the MySQL data volume. Never put deletion acknowledgements into the backend's normal environment file.
+
+Invoke it hourly with a host cron entry (adjust the repository path):
+
+```cron
+0 * * * * cd /home/ec2-user/workspace/teamgg && /usr/bin/python3 apps/backend/scripts/retention_scheduler.py >> /var/log/teamgg-retention.log 2>&1
+```
+
+The script checks its KST maintenance window, 30-day default interval, 24-hour retry interval, host disk floor, backend health, and a host file lock. It first runs a dry-run with the database load guard enabled. If no matches are eligible, it records completion without stopping the backend. Otherwise it stops only the backend, runs the bounded cleanup, and attempts to restart and health-check it even after deletion failure. It records completion only after a successful restart. A timed-out or low-disk job is stopped; the next eligible window resumes from remaining matches. JSON logs include preview, deleted matches and rows, duration, completion, restoration, and failure reason. An optional Slack-compatible webhook receives failure alerts.
+
+Do not enable this schedule until an operator has verified a production dry-run, a limited manual deletion, backup/recovery posture, and the maintenance window. Cron installation and setting both enable switches are separate production actions.
 
 ## Verification
 

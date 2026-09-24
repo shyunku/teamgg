@@ -11,6 +11,8 @@ func TestDataRetentionOptionsDefaultToDryRun(t *testing.T) {
 		"DATA_RETENTION_DRY_RUN", "DATA_RETENTION_DELETE_ACK", "DATA_RETENTION_OFFLINE_ACK",
 		"DATA_RETENTION_MATCH_PATCHES", "DATA_RETENTION_BATCH_SIZE",
 		"DATA_RETENTION_BATCH_TIMEOUT", "DATA_RETENTION_WORK_LIMIT",
+		"DATA_RETENTION_ENFORCE_LOAD_GUARD", "DATA_RETENTION_MAX_THREADS_RUNNING",
+		"DATA_RETENTION_MAX_LOCK_WAITS",
 	} {
 		t.Setenv(key, "")
 	}
@@ -21,6 +23,19 @@ func TestDataRetentionOptionsDefaultToDryRun(t *testing.T) {
 	if options.RetainedPatches != 8 || options.BatchSize != 100 ||
 		options.BatchTimeout != 2*time.Minute || options.WorkLimit != 10*time.Minute {
 		t.Fatalf("unexpected retention defaults: %+v", options)
+	}
+	if options.EnforceLoadGuard || options.MaxThreadsRunning != 4 || options.MaxLockWaits != 0 {
+		t.Fatalf("unexpected retention load guard defaults: %+v", options)
+	}
+}
+
+func TestDataRetentionLoadGuardEnvironment(t *testing.T) {
+	t.Setenv("DATA_RETENTION_ENFORCE_LOAD_GUARD", "true")
+	t.Setenv("DATA_RETENTION_MAX_THREADS_RUNNING", "7")
+	t.Setenv("DATA_RETENTION_MAX_LOCK_WAITS", "2")
+	options := DataRetentionOptionsFromEnvironment()
+	if !options.EnforceLoadGuard || options.MaxThreadsRunning != 7 || options.MaxLockWaits != 2 {
+		t.Fatalf("unexpected retention load guard options: %+v", options)
 	}
 }
 

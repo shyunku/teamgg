@@ -229,7 +229,7 @@ func main() {
 		)
 		result, cleanupErr := migrations.CleanupRetainedData(ctx, db.Root.DB, options)
 		if cleanupErr != nil {
-			log.Error(cleanupErr)
+			log.Errorf("Data retention cleanup failed: result=%s error=%v", result.String(), cleanupErr)
 			os.Exit(-4)
 		}
 		log.Infof("Data retention cleanup finished: %s", result.String())

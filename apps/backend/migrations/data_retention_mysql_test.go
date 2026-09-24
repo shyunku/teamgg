@@ -58,7 +58,8 @@ func TestDataRetentionMySQL(t *testing.T) {
 	createDataRetentionFixture(t, database)
 
 	dryRun, err := CleanupRetainedData(ctx, database, DataRetentionOptions{
-		DryRun: true, RetainedPatches: 3, BatchSize: 10,
+		DryRun: true, EnforceLoadGuard: true, MaxThreadsRunning: 100, MaxLockWaits: 100,
+		RetainedPatches: 3, BatchSize: 10,
 		BatchTimeout: time.Minute, WorkLimit: time.Minute,
 	})
 	if err != nil {
@@ -71,6 +72,7 @@ func TestDataRetentionMySQL(t *testing.T) {
 
 	deleted, err := CleanupRetainedData(ctx, database, DataRetentionOptions{
 		DryRun: false, DeleteAcknowledged: true, OfflineAcknowledged: true,
+		EnforceLoadGuard: true, MaxThreadsRunning: 100, MaxLockWaits: 100,
 		RetainedPatches: 3, BatchSize: 10,
 		BatchTimeout: time.Minute, WorkLimit: time.Minute,
 	})
