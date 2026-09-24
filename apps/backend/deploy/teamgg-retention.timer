@@ -1,0 +1,10 @@
+[Unit]
+Description=Check team.gg match retention every hour
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+Unit=teamgg-retention.service
+
+[Install]
+WantedBy=timers.target

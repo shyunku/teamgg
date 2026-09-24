@@ -55,6 +55,28 @@ class RetentionSchedulerTests(unittest.TestCase):
                              [call.args[0] for call in run.call_args_list])
             self.assertFalse((scheduler.STATE_DIR / "state.json").exists())
 
+    def test_restore_marker_recovers_backend(self):
+        scheduler.STATE_DIR.mkdir(exist_ok=True)
+        marker = scheduler.STATE_DIR / "restore-needed"
+        marker.touch()
+        with patch.object(scheduler, "run", return_value=types.SimpleNamespace(
+                 returncode=0, stdout="")) as run, \
+             patch.object(scheduler, "backend_health") as health:
+            scheduler.restore_backend_if_needed()
+            run.assert_called_once_with(scheduler.compose("up", "-d", "--no-deps", "backend"), timeout=120)
+            health.assert_called_once()
+            self.assertFalse(marker.exists())
+
+    def test_failed_restore_keeps_marker_for_retry(self):
+        scheduler.STATE_DIR.mkdir(exist_ok=True)
+        marker = scheduler.STATE_DIR / "restore-needed"
+        marker.touch()
+        with patch.object(scheduler, "run", return_value=types.SimpleNamespace(
+                 returncode=1, stdout="failed")):
+            with self.assertRaisesRegex(RuntimeError, "restoration failed"):
+                scheduler.restore_backend_if_needed()
+            self.assertTrue(marker.exists())
+
     def test_window_and_interval(self):
         self.assertTrue(scheduler.in_window(self.now, "02:00", "04:00"))
         self.assertFalse(scheduler.in_window(self.now, "03:00", "04:00"))

@@ -68,17 +68,22 @@ Numeric match and participant identity mappings are retained. They are migration
 
 The host-side scheduler is disabled by default. It runs the existing cleanup command, not a second deletion implementation. It needs Python 3.9+ on the Linux Docker host. Copy [the configuration template](../../../.env.retention.example) to the ignored root `.env.retention` and set the host path containing the MySQL data volume. Never put deletion acknowledgements into the backend's normal environment file.
 
-Invoke it hourly with a host cron entry (adjust the repository path):
+On the EC2 host, install the systemd units after creating the ignored root `.env.retention` with both enable switches set to `true`:
 
-```cron
-0 * * * * cd /home/ec2-user/workspace/teamgg && /usr/bin/python3 apps/backend/scripts/retention_scheduler.py >> /var/log/teamgg-retention.log 2>&1
+```bash
+sudo install -m 644 apps/backend/deploy/teamgg-retention.service /etc/systemd/system/
+sudo install -m 644 apps/backend/deploy/teamgg-retention.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now teamgg-retention.timer
+systemctl list-timers teamgg-retention.timer
+journalctl -u teamgg-retention.service -n 30 --no-pager
 ```
 
-The script checks its KST maintenance window, 30-day default interval, 24-hour retry interval, host disk floor, backend health, and a host file lock. It first runs a dry-run with the database load guard enabled. If no matches are eligible, it records completion without stopping the backend. Otherwise it stops only the backend, runs the bounded cleanup, and attempts to restart and health-check it even after deletion failure. It records completion only after a successful restart. A timed-out or low-disk job is stopped; the next eligible window resumes from remaining matches. JSON logs include preview, deleted matches and rows, duration, completion, restoration, and failure reason. An optional Slack-compatible webhook receives failure alerts.
+The timer checks hourly; the script enforces its KST maintenance window, 7-day default interval, 24-hour retry interval, host disk floor, backend health, and a host file lock. It first runs a dry-run with the database load guard enabled. If no matches are eligible, it records completion without stopping the backend. Otherwise it stops only the backend, runs the bounded cleanup, and attempts to restart and health-check it even after deletion failure. A restore marker plus `ExecStopPost` retries backend restoration if the service is interrupted. It records completion only after a successful restart. A timed-out or low-disk job is stopped; the next eligible window resumes from remaining matches. JSON logs include preview, deleted matches and rows, duration, completion, restoration, and failure reason. An optional Slack-compatible webhook receives failure alerts; without a configured webhook, inspect the journal.
 
 For a one-shot read-only host integration check, set `RETENTION_ENABLED=true RETENTION_PREVIEW_ONLY=true` for that process. It does not stop the backend or write a successful-run timestamp.
 
-Do not enable this schedule until an operator has verified a production dry-run, a limited manual deletion, backup/recovery posture, and the maintenance window. Cron installation and setting both enable switches are separate production actions.
+Before enabling it, verify production dry-run targets, backup/recovery posture, disk floor and the maintenance window. Installing the timer and setting both enable switches are separate production actions.
 
 ## Verification
 

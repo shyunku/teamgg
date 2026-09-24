@@ -142,6 +142,18 @@ def backend_health(timeout=120):
     raise RuntimeError("backend did not become healthy after restoration")
 
 
+def restore_backend_if_needed():
+    marker = STATE_DIR / "restore-needed"
+    if not marker.exists():
+        return
+    restored = run(compose("up", "-d", "--no-deps", "backend"), timeout=120)
+    if restored.returncode:
+        raise RuntimeError(f"backend restoration failed: {restored.stdout[-500:]}")
+    backend_health()
+    marker.unlink()
+    log("backend_restored")
+
+
 def alert(config, message):
     url = config.get("RETENTION_ALERT_WEBHOOK_URL", "")
     if not url:
@@ -180,7 +192,7 @@ def execute(config, now):
             return
         state_path = STATE_DIR / "state.json"
         state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
-        interval = setting_int(config, "RETENTION_INTERVAL_DAYS", 30, 1, 365)
+        interval = setting_int(config, "RETENTION_INTERVAL_DAYS", 7, 1, 365)
         retry = setting_int(config, "RETENTION_RETRY_HOURS", 24, 1, 168)
         for key, delay in (("completedAt", timedelta(days=interval)), ("attemptedAt", timedelta(hours=retry))):
             if state.get(key) and now < datetime.fromisoformat(state[key]) + delay:
@@ -205,8 +217,9 @@ def execute(config, now):
             return
         check_disk(config)
 
-        # A stop command can partially succeed. Always attempt restoration once issued.
+        # A stop command can partially succeed. The marker also survives process termination.
         result = None
+        (STATE_DIR / "restore-needed").touch()
         try:
             stopped = run(compose("stop", "backend"), timeout=120)
             if stopped.returncode:
@@ -218,11 +231,7 @@ def execute(config, now):
                 durationMs=result["durationMs"], completed=result["completed"],
                 stopReason="complete" if result["completed"] else "work_limit")
         finally:
-            restored = run(compose("up", "-d", "--no-deps", "backend"), timeout=120)
-            if restored.returncode:
-                raise RuntimeError(f"backend restoration failed: {restored.stdout[-500:]}")
-            backend_health()
-            log("backend_restored")
+            restore_backend_if_needed()
         if result and result["completed"]:
             state["completedAt"] = now.isoformat()
             state_path.write_text(json.dumps(state), encoding="utf-8")
@@ -231,6 +240,9 @@ def execute(config, now):
 def main():
     config = {}
     try:
+        restore_backend_if_needed()
+        if sys.argv[1:] == ["--restore-backend"]:
+            return 0
         config = load_config(ROOT / ".env.retention")
         execute(config, datetime.now(TZ))
     except Exception as exc:
