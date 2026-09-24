@@ -13,4 +13,3 @@ ExecStart=/usr/bin/python3 /home/ec2-user/workspace/teamgg/apps/backend/scripts/
 ExecStopPost=/usr/bin/python3 /home/ec2-user/workspace/teamgg/apps/backend/scripts/retention_scheduler.py --restore-backend
 TimeoutStartSec=20min
 TimeoutStopSec=3min
-
