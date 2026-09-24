@@ -40,6 +40,21 @@ class RetentionSchedulerTests(unittest.TestCase):
             scheduler.execute({}, self.now)
             run.assert_not_called()
 
+    def test_preview_only_never_stops_or_records_attempt(self):
+        config = dict(self.config, RETENTION_DELETE_ENABLED="false", RETENTION_PREVIEW_ONLY="true")
+        with patch.object(scheduler, "run", return_value=types.SimpleNamespace(
+                 returncode=0, stdout="container-id")) as run, \
+             patch.object(scheduler, "check_disk"), \
+             patch.object(scheduler, "backend_health"), \
+             patch.object(scheduler, "retention_run", return_value={
+                 "eligibleMatches": 4, "retainedPatches": ["16.18"], "expiredVersions": ["16.10"]
+             }) as retention:
+            scheduler.execute(config, self.now)
+            retention.assert_called_once_with(config, dry_run=True)
+            self.assertNotIn(scheduler.compose("stop", "backend"),
+                             [call.args[0] for call in run.call_args_list])
+            self.assertFalse((scheduler.STATE_DIR / "state.json").exists())
+
     def test_window_and_interval(self):
         self.assertTrue(scheduler.in_window(self.now, "02:00", "04:00"))
         self.assertFalse(scheduler.in_window(self.now, "03:00", "04:00"))

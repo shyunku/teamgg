@@ -159,7 +159,8 @@ def execute(config, now):
     if config.get("RETENTION_ENABLED", "false").lower() != "true":
         log("disabled")
         return
-    if config.get("RETENTION_DELETE_ENABLED", "false").lower() != "true":
+    preview_only = config.get("RETENTION_PREVIEW_ONLY", "false").lower() == "true"
+    if config.get("RETENTION_DELETE_ENABLED", "false").lower() != "true" and not preview_only:
         log("deletion_disabled")
         return
     start = config.get("RETENTION_WINDOW_START", "02:00")
@@ -190,11 +191,14 @@ def execute(config, now):
         if container.returncode or not container.stdout.strip():
             raise RuntimeError("backend is not running; refusing automated deletion")
         backend_health(timeout=5)
-        state["attemptedAt"] = now.isoformat()
-        state_path.write_text(json.dumps(state), encoding="utf-8")
         preview = retention_run(config, dry_run=True)
         log("preview", eligibleMatches=preview["eligibleMatches"],
             retainedPatches=preview["retainedPatches"], expiredVersions=preview["expiredVersions"])
+        if preview_only:
+            log("preview_only")
+            return
+        state["attemptedAt"] = now.isoformat()
+        state_path.write_text(json.dumps(state), encoding="utf-8")
         if not preview["eligibleMatches"]:
             state["completedAt"] = now.isoformat()
             state_path.write_text(json.dumps(state), encoding="utf-8")

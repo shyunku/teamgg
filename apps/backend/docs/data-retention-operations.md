@@ -76,6 +76,8 @@ Invoke it hourly with a host cron entry (adjust the repository path):
 
 The script checks its KST maintenance window, 30-day default interval, 24-hour retry interval, host disk floor, backend health, and a host file lock. It first runs a dry-run with the database load guard enabled. If no matches are eligible, it records completion without stopping the backend. Otherwise it stops only the backend, runs the bounded cleanup, and attempts to restart and health-check it even after deletion failure. It records completion only after a successful restart. A timed-out or low-disk job is stopped; the next eligible window resumes from remaining matches. JSON logs include preview, deleted matches and rows, duration, completion, restoration, and failure reason. An optional Slack-compatible webhook receives failure alerts.
 
+For a one-shot read-only host integration check, set `RETENTION_ENABLED=true RETENTION_PREVIEW_ONLY=true` for that process. It does not stop the backend or write a successful-run timestamp.
+
 Do not enable this schedule until an operator has verified a production dry-run, a limited manual deletion, backup/recovery posture, and the maintenance window. Cron installation and setting both enable switches are separate production actions.
 
 ## Verification
