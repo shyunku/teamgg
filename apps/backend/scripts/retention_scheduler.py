@@ -235,6 +235,11 @@ def execute(config, now):
         if result and result["completed"]:
             state["completedAt"] = now.isoformat()
             state_path.write_text(json.dumps(state), encoding="utf-8")
+        elif result:
+            # The next eligible window resumes after the retry interval; make the partial run visible.
+            remaining = max(0, result["eligibleMatches"] - result["deletedMatches"])
+            alert(config, f"teamgg retention stopped at work limit: deletedMatches={result['deletedMatches']} "
+                          f"remainingMatches={remaining}")
 
 
 def main():

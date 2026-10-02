@@ -1,8 +1,10 @@
+import http.server
 import importlib.util
 import json
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import types
 import unittest
 from datetime import datetime
@@ -137,6 +139,65 @@ class RetentionSchedulerTests(unittest.TestCase):
             self.assertEqual(health.call_count, 2)
             state = json.loads((scheduler.STATE_DIR / "state.json").read_text())
             self.assertEqual(state["completedAt"], self.now.isoformat())
+
+    def test_work_limit_alerts_and_keeps_retry_pending(self):
+        def fake_run(command, timeout=60):
+            return types.SimpleNamespace(returncode=0, stdout="container-id")
+
+        with patch.object(scheduler, "run", side_effect=fake_run), \
+             patch.object(scheduler, "check_disk"), \
+             patch.object(scheduler, "backend_health"), \
+             patch.object(scheduler, "alert") as alert, \
+             patch.object(scheduler, "retention_run", side_effect=[
+                 {"eligibleMatches": 250, "retainedPatches": ["16.18"], "expiredVersions": ["16.10"]},
+                 {"eligibleMatches": 250, "deletedMatches": 200, "deletedRows": {"matches": 200},
+                  "durationMs": 600000, "completed": False},
+             ]):
+            scheduler.execute(self.config, self.now)
+            alert.assert_called_once()
+            self.assertIn("remainingMatches=50", alert.call_args.args[1])
+            state = json.loads((scheduler.STATE_DIR / "state.json").read_text())
+            self.assertNotIn("completedAt", state)
+            self.assertEqual(state["attemptedAt"], self.now.isoformat())
+
+    def test_main_failure_sends_alert(self):
+        with patch.object(scheduler, "restore_backend_if_needed"), \
+             patch.object(scheduler, "load_config", return_value={"RETENTION_ALERT_WEBHOOK_URL": "x"}), \
+             patch.object(scheduler, "execute", side_effect=RuntimeError("disk floor reached")), \
+             patch.object(scheduler, "alert") as alert, \
+             patch.object(sys, "argv", ["retention_scheduler.py"]):
+            self.assertEqual(scheduler.main(), 1)
+            alert.assert_called_once_with({"RETENTION_ALERT_WEBHOOK_URL": "x"},
+                                          "teamgg retention scheduler failed: disk floor reached")
+
+    def test_alert_posts_slack_compatible_json(self):
+        received = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = self.rfile.read(int(self.headers["Content-Length"]))
+                received.append((self.headers["Content-Type"], json.loads(body)))
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, *_):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.handle_request)
+        thread.start()
+        try:
+            url = f"http://127.0.0.1:{server.server_port}/hook"
+            scheduler.alert({"RETENTION_ALERT_WEBHOOK_URL": url}, "retention failed")
+            thread.join(timeout=5)
+        finally:
+            server.server_close()
+        self.assertEqual(received, [("application/json", {"text": "retention failed"})])
+
+    def test_alert_failure_is_logged_without_raising(self):
+        with patch.object(scheduler, "log") as log:
+            scheduler.alert({"RETENTION_ALERT_WEBHOOK_URL": "http://127.0.0.1:9/unreachable"}, "x")
+            self.assertEqual(log.call_args.args[0], "alert_failed")
 
 
 if __name__ == "__main__":
