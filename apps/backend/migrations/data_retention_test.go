@@ -12,16 +12,16 @@ func TestDataRetentionOptionsDefaultToDryRun(t *testing.T) {
 		"DATA_RETENTION_MATCH_PATCHES", "DATA_RETENTION_BATCH_SIZE",
 		"DATA_RETENTION_BATCH_TIMEOUT", "DATA_RETENTION_WORK_LIMIT",
 		"DATA_RETENTION_ENFORCE_LOAD_GUARD", "DATA_RETENTION_MAX_THREADS_RUNNING",
-		"DATA_RETENTION_MAX_LOCK_WAITS",
+		"DATA_RETENTION_MAX_LOCK_WAITS", "DATA_RETENTION_ONLINE", "DATA_RETENTION_BATCH_PAUSE",
 	} {
 		t.Setenv(key, "")
 	}
 	options := DataRetentionOptionsFromEnvironment()
-	if !options.DryRun || options.DeleteAcknowledged || options.OfflineAcknowledged {
+	if !options.DryRun || options.DeleteAcknowledged || options.OfflineAcknowledged || options.Online {
 		t.Fatalf("retention defaults are unsafe: %+v", options)
 	}
 	if options.RetainedPatches != 8 || options.BatchSize != 100 ||
-		options.BatchTimeout != 2*time.Minute || options.WorkLimit != 10*time.Minute {
+		options.BatchTimeout != 2*time.Minute || options.WorkLimit != 10*time.Minute || options.BatchPause != 0 {
 		t.Fatalf("unexpected retention defaults: %+v", options)
 	}
 	if options.EnforceLoadGuard || options.MaxThreadsRunning != 4 || options.MaxLockWaits != 0 {
@@ -36,6 +36,24 @@ func TestDataRetentionLoadGuardEnvironment(t *testing.T) {
 	options := DataRetentionOptionsFromEnvironment()
 	if !options.EnforceLoadGuard || options.MaxThreadsRunning != 7 || options.MaxLockWaits != 2 {
 		t.Fatalf("unexpected retention load guard options: %+v", options)
+	}
+}
+
+func TestDataRetentionOnlineEnvironment(t *testing.T) {
+	t.Setenv("DATA_RETENTION_ONLINE", "true")
+	t.Setenv("DATA_RETENTION_BATCH_SIZE", "")
+	t.Setenv("DATA_RETENTION_BATCH_PAUSE", "")
+	t.Setenv("DATA_RETENTION_WORK_LIMIT", "2h")
+	options := DataRetentionOptionsFromEnvironment()
+	if !options.Online || options.BatchSize != 20 || options.BatchPause != 500*time.Millisecond || options.WorkLimit != 2*time.Hour {
+		t.Fatalf("unexpected online retention options: %+v", options)
+	}
+	t.Setenv("DATA_RETENTION_BATCH_SIZE", "50")
+	t.Setenv("DATA_RETENTION_BATCH_PAUSE", "2s")
+	t.Setenv("DATA_RETENTION_WORK_LIMIT", "4h")
+	options = DataRetentionOptionsFromEnvironment()
+	if options.BatchSize != 50 || options.BatchPause != 2*time.Second || options.WorkLimit != 10*time.Minute {
+		t.Fatalf("unexpected bounded online retention options: %+v", options)
 	}
 }
 
@@ -60,6 +78,17 @@ func TestRetentionDeletionRequiresBothAcknowledgements(t *testing.T) {
 	_, err := CleanupRetainedData(t.Context(), nil, DataRetentionOptions{DryRun: false})
 	if err == nil || !strings.Contains(err.Error(), "DELETE_ACK") || !strings.Contains(err.Error(), "OFFLINE_ACK") {
 		t.Fatalf("destructive retention was not rejected: %v", err)
+	}
+}
+
+func TestRetentionOnlineModeReplacesOfflineAcknowledgement(t *testing.T) {
+	_, err := CleanupRetainedData(t.Context(), nil, DataRetentionOptions{DryRun: false, Online: true})
+	if err == nil || !strings.Contains(err.Error(), "DELETE_ACK") {
+		t.Fatalf("online retention without delete acknowledgement was not rejected: %v", err)
+	}
+	_, err = CleanupRetainedData(t.Context(), nil, DataRetentionOptions{DryRun: false, Online: true, DeleteAcknowledged: true})
+	if err == nil || strings.Contains(err.Error(), "DELETE_ACK") {
+		t.Fatalf("online retention should pass acknowledgement checks: %v", err)
 	}
 }
 

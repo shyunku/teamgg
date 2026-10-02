@@ -223,9 +223,9 @@ func main() {
 			}
 		}
 		log.Infof(
-			"Data retention cleanup starting: dryRun=%t retainedPatches=%d batchSize=%d batchTimeout=%s workLimit=%s offlineAcknowledged=%t deleteAcknowledged=%t",
-			options.DryRun, options.RetainedPatches, options.BatchSize, options.BatchTimeout,
-			options.WorkLimit, options.OfflineAcknowledged, options.DeleteAcknowledged,
+			"Data retention cleanup starting: dryRun=%t online=%t retainedPatches=%d batchSize=%d batchTimeout=%s batchPause=%s workLimit=%s offlineAcknowledged=%t deleteAcknowledged=%t",
+			options.DryRun, options.Online, options.RetainedPatches, options.BatchSize, options.BatchTimeout,
+			options.BatchPause, options.WorkLimit, options.OfflineAcknowledged, options.DeleteAcknowledged,
 		)
 		result, cleanupErr := migrations.CleanupRetainedData(ctx, db.Root.DB, options)
 		if cleanupErr != nil {

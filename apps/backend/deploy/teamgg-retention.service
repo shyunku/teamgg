@@ -11,5 +11,5 @@ Group=ec2-user
 WorkingDirectory=/home/ec2-user/workspace/teamgg
 ExecStart=/usr/bin/python3 /home/ec2-user/workspace/teamgg/apps/backend/scripts/retention_scheduler.py
 ExecStopPost=/usr/bin/python3 /home/ec2-user/workspace/teamgg/apps/backend/scripts/retention_scheduler.py --restore-backend
-TimeoutStartSec=20min
+TimeoutStartSec=150min
 TimeoutStopSec=3min

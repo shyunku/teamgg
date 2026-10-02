@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	mysqlDriver "github.com/go-sql-driver/mysql"
 	version "github.com/hashicorp/go-version"
 	"github.com/jmoiron/sqlx"
 )
@@ -20,30 +21,43 @@ const (
 	defaultRetentionBatchSize    = 100
 	defaultRetentionBatchTimeout = 2 * time.Minute
 	defaultRetentionWorkLimit    = 10 * time.Minute
+	maxRetentionWorkLimit        = 3 * time.Hour
+
+	// Online cleanup keeps each batch short so normal API writes are not blocked for long.
+	defaultOnlineRetentionBatchSize  = 20
+	defaultOnlineRetentionBatchPause = 500 * time.Millisecond
+	onlineRetentionLockWaitSeconds   = 5
+	onlineRetentionMaxBatchAttempts  = 5
+	onlineRetentionThrottleDelay     = 10 * time.Second
 )
 
 type DataRetentionOptions struct {
 	DryRun              bool
 	DeleteAcknowledged  bool
 	OfflineAcknowledged bool
+	Online              bool
 	EnforceLoadGuard    bool
 	MaxThreadsRunning   int
 	MaxLockWaits        int
 	RetainedPatches     int
 	BatchSize           int
 	BatchTimeout        time.Duration
+	BatchPause          time.Duration
 	WorkLimit           time.Duration
 	Progress            func(DataRetentionResult)
 }
 
 type DataRetentionResult struct {
 	DryRun           bool             `json:"dryRun"`
+	Online           bool             `json:"online"`
 	RetainedPatches  []string         `json:"retainedPatches"`
 	ExpiredVersions  []string         `json:"expiredVersions"`
 	EligibleMatches  int64            `json:"eligibleMatches"`
 	DeletedMatches   int64            `json:"deletedMatches"`
 	DeletedRows      map[string]int64 `json:"deletedRows,omitempty"`
 	DeleteDurationMs map[string]int64 `json:"deleteDurationMs,omitempty"`
+	ThrottledWaits   int64            `json:"throttledWaits"`
+	RetriedBatches   int64            `json:"retriedBatches"`
 	Completed        bool             `json:"completed"`
 	Duration         time.Duration    `json:"-"`
 	DurationMillis   int64            `json:"durationMs"`
@@ -147,17 +161,24 @@ var retentionMatchDeleteStatements = []retentionDeleteStatement{
 }
 
 func DataRetentionOptionsFromEnvironment() DataRetentionOptions {
+	online := retentionEnvBool("DATA_RETENTION_ONLINE", false)
+	batchSize, batchPause := defaultRetentionBatchSize, time.Duration(0)
+	if online {
+		batchSize, batchPause = defaultOnlineRetentionBatchSize, defaultOnlineRetentionBatchPause
+	}
 	return DataRetentionOptions{
 		DryRun:              retentionEnvBool("DATA_RETENTION_DRY_RUN", true),
 		DeleteAcknowledged:  retentionEnvBool("DATA_RETENTION_DELETE_ACK", false),
 		OfflineAcknowledged: retentionEnvBool("DATA_RETENTION_OFFLINE_ACK", false),
+		Online:              online,
 		EnforceLoadGuard:    retentionEnvBool("DATA_RETENTION_ENFORCE_LOAD_GUARD", false),
 		MaxThreadsRunning:   retentionEnvInt("DATA_RETENTION_MAX_THREADS_RUNNING", 4, 1, 100),
 		MaxLockWaits:        retentionEnvInt("DATA_RETENTION_MAX_LOCK_WAITS", 0, 0, 100),
 		RetainedPatches:     retentionEnvInt("DATA_RETENTION_MATCH_PATCHES", defaultRetentionMatchPatches, 3, 30),
-		BatchSize:           retentionEnvInt("DATA_RETENTION_BATCH_SIZE", defaultRetentionBatchSize, 10, 1000),
+		BatchSize:           retentionEnvInt("DATA_RETENTION_BATCH_SIZE", batchSize, 10, 1000),
 		BatchTimeout:        retentionEnvDuration("DATA_RETENTION_BATCH_TIMEOUT", defaultRetentionBatchTimeout, 10*time.Second, 15*time.Minute),
-		WorkLimit:           retentionEnvDuration("DATA_RETENTION_WORK_LIMIT", defaultRetentionWorkLimit, time.Second, time.Hour),
+		BatchPause:          retentionEnvDuration("DATA_RETENTION_BATCH_PAUSE", batchPause, 0, 10*time.Second),
+		WorkLimit:           retentionEnvDuration("DATA_RETENTION_WORK_LIMIT", defaultRetentionWorkLimit, time.Second, maxRetentionWorkLimit),
 	}
 }
 
@@ -191,7 +212,8 @@ func retentionEnvDuration(key string, fallback, minimum, maximum time.Duration) 
 
 func CleanupRetainedData(ctx context.Context, database *sqlx.DB, options DataRetentionOptions) (result DataRetentionResult, returnedErr error) {
 	result = DataRetentionResult{
-		DryRun: options.DryRun, DeletedRows: make(map[string]int64), DeleteDurationMs: make(map[string]int64),
+		DryRun: options.DryRun, Online: options.Online,
+		DeletedRows: make(map[string]int64), DeleteDurationMs: make(map[string]int64),
 	}
 	started := time.Now()
 	defer func() {
@@ -199,8 +221,8 @@ func CleanupRetainedData(ctx context.Context, database *sqlx.DB, options DataRet
 		result.DurationMillis = result.Duration.Milliseconds()
 	}()
 
-	if !options.DryRun && (!options.DeleteAcknowledged || !options.OfflineAcknowledged) {
-		return result, errors.New("retention deletion requires DATA_RETENTION_DELETE_ACK=true and DATA_RETENTION_OFFLINE_ACK=true after backend writes are stopped")
+	if !options.DryRun && (!options.DeleteAcknowledged || (!options.OfflineAcknowledged && !options.Online)) {
+		return result, errors.New("retention deletion requires DATA_RETENTION_DELETE_ACK=true and either DATA_RETENTION_ONLINE=true or DATA_RETENTION_OFFLINE_ACK=true after backend writes are stopped")
 	}
 	if database == nil {
 		return result, errors.New("retention cleanup database is required")
@@ -214,7 +236,10 @@ func CleanupRetainedData(ctx context.Context, database *sqlx.DB, options DataRet
 	if options.BatchTimeout < 10*time.Second || options.BatchTimeout > 15*time.Minute {
 		options.BatchTimeout = defaultRetentionBatchTimeout
 	}
-	if options.WorkLimit < time.Second || options.WorkLimit > time.Hour {
+	if options.BatchPause < 0 || options.BatchPause > 10*time.Second {
+		options.BatchPause = 0
+	}
+	if options.WorkLimit < time.Second || options.WorkLimit > maxRetentionWorkLimit {
 		options.WorkLimit = defaultRetentionWorkLimit
 	}
 	if options.EnforceLoadGuard {
@@ -254,42 +279,81 @@ func CleanupRetainedData(ctx context.Context, database *sqlx.DB, options DataRet
 			returnedErr = errors.Join(returnedErr, fmt.Errorf("release retention cleanup lock: %w", err))
 		}
 	}()
+	if options.Online {
+		// READ COMMITTED avoids gap locks on live secondary-index ranges, and a short lock wait
+		// makes this job yield to API writers instead of blocking them.
+		if _, err := connection.ExecContext(ctx, fmt.Sprintf(
+			"SET SESSION transaction_isolation = 'READ-COMMITTED', SESSION innodb_lock_wait_timeout = %d",
+			onlineRetentionLockWaitSeconds,
+		)); err != nil {
+			return result, fmt.Errorf("configure online retention session: %w", err)
+		}
+	}
 	deadline := time.Now().Add(options.WorkLimit)
 	for time.Now().Before(deadline) {
-		batchContext, cancel := context.WithTimeout(ctx, options.BatchTimeout)
 		if options.EnforceLoadGuard {
-			if err := validateRetentionDatabaseLoad(batchContext, connection, options); err != nil {
-				cancel()
-				return result, err
+			if err := validateRetentionDatabaseLoad(ctx, connection, options); err != nil {
+				if !options.Online {
+					return result, err
+				}
+				// Online cleanup waits for the service load to settle instead of failing the run.
+				result.ThrottledWaits++
+				if !sleepRetentionUntil(ctx, onlineRetentionThrottleDelay, deadline) {
+					break
+				}
+				continue
 			}
 		}
-		matchIDs, selectErr := selectRetentionMatchBatch(batchContext, connection, result.ExpiredVersions, options.BatchSize)
-		if selectErr != nil {
-			cancel()
-			return result, selectErr
+		deleted, batchErr := runRetentionMatchBatch(ctx, connection, &result, options)
+		if batchErr != nil {
+			return result, batchErr
 		}
-		if len(matchIDs) == 0 {
-			cancel()
+		if !deleted {
 			result.Completed = true
 			break
 		}
+		if options.Progress != nil {
+			options.Progress(result)
+		}
+		if options.BatchPause > 0 && !sleepRetentionUntil(ctx, options.BatchPause, deadline) {
+			break
+		}
+	}
+	return result, nil
+}
 
-		tx, txErr := beginNumericKeyBackfillTransactionOnConnection(batchContext, connection)
-		if txErr != nil {
+// runRetentionMatchBatch deletes one batch atomically and reports whether any match remained.
+// Online cleanup retries lock conflicts with API writers; the rolled-back batch is reselected.
+func runRetentionMatchBatch(ctx context.Context, connection *sqlx.Conn, result *DataRetentionResult, options DataRetentionOptions) (bool, error) {
+	for attempt := 1; ; attempt++ {
+		batchContext, cancel := context.WithTimeout(ctx, options.BatchTimeout)
+		matchIDs, err := selectRetentionMatchBatch(batchContext, connection, result.ExpiredVersions, options.BatchSize)
+		if err != nil || len(matchIDs) == 0 {
 			cancel()
-			return result, txErr
+			return false, err
 		}
-		batchRows, batchDurations, deleteErr := deleteRetentionMatchBatch(batchContext, tx, matchIDs)
-		if deleteErr != nil {
+		tx, err := beginNumericKeyBackfillTransactionOnConnection(batchContext, connection)
+		if err != nil {
+			cancel()
+			return false, err
+		}
+		batchRows, batchDurations, err := deleteRetentionMatchBatch(batchContext, tx, matchIDs)
+		if err != nil {
 			_ = tx.Rollback()
-			cancel()
-			return result, deleteErr
-		}
-		if commitErr := tx.Commit(); commitErr != nil {
-			cancel()
-			return result, commitErr
+		} else {
+			err = tx.Commit()
 		}
 		cancel()
+		if err != nil {
+			if !options.Online || !isRetentionLockConflict(err) || attempt >= onlineRetentionMaxBatchAttempts {
+				return false, err
+			}
+			result.RetriedBatches++
+			if !sleepRetentionUntil(ctx, time.Duration(attempt)*time.Second, time.Time{}) {
+				return false, ctx.Err()
+			}
+			continue
+		}
 		for table, rows := range batchRows {
 			result.DeletedRows[table] += rows
 		}
@@ -297,11 +361,32 @@ func CleanupRetainedData(ctx context.Context, database *sqlx.DB, options DataRet
 			result.DeleteDurationMs[table] += duration.Milliseconds()
 		}
 		result.DeletedMatches += int64(len(matchIDs))
-		if options.Progress != nil {
-			options.Progress(result)
-		}
+		return true, nil
 	}
-	return result, nil
+}
+
+func isRetentionLockConflict(err error) bool {
+	var mysqlErr *mysqlDriver.MySQLError
+	if !errors.As(err, &mysqlErr) {
+		return false
+	}
+	// 1205: lock wait timeout, 1213: deadlock.
+	return mysqlErr.Number == 1205 || mysqlErr.Number == 1213
+}
+
+// sleepRetentionUntil waits for delay and reports false when the context ends or the wait would pass a non-zero deadline.
+func sleepRetentionUntil(ctx context.Context, delay time.Duration, deadline time.Time) bool {
+	if !deadline.IsZero() && time.Now().Add(delay).After(deadline) {
+		return false
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 type retentionLoadQueryer interface {

@@ -91,6 +91,8 @@ class RetentionSchedulerTests(unittest.TestCase):
             run.assert_not_called()
 
     def test_deletion_failure_restores_backend_without_marking_complete(self):
+        config = dict(self.config, RETENTION_MODE="offline")
+
         def fake_run(command, timeout=60):
             return types.SimpleNamespace(returncode=0, stdout="container-id")
 
@@ -102,7 +104,7 @@ class RetentionSchedulerTests(unittest.TestCase):
                  RuntimeError("delete failed"),
              ]):
             with self.assertRaisesRegex(RuntimeError, "delete failed"):
-                scheduler.execute(self.config, self.now)
+                scheduler.execute(config, self.now)
             commands = [call.args[0] for call in run.call_args_list]
             self.assertIn(scheduler.compose("stop", "backend"), commands)
             self.assertIn(scheduler.compose("up", "-d", "--no-deps", "backend"), commands)
@@ -123,11 +125,13 @@ class RetentionSchedulerTests(unittest.TestCase):
             state = json.loads((scheduler.STATE_DIR / "state.json").read_text())
             self.assertEqual(state["completedAt"], self.now.isoformat())
 
-    def test_success_marks_complete_after_health_check(self):
+    def test_offline_success_marks_complete_after_health_check(self):
+        config = dict(self.config, RETENTION_MODE="offline")
+
         def fake_run(command, timeout=60):
             return types.SimpleNamespace(returncode=0, stdout="container-id")
 
-        with patch.object(scheduler, "run", side_effect=fake_run), \
+        with patch.object(scheduler, "run", side_effect=fake_run) as run, \
              patch.object(scheduler, "check_disk"), \
              patch.object(scheduler, "backend_health") as health, \
              patch.object(scheduler, "retention_run", side_effect=[
@@ -135,10 +139,83 @@ class RetentionSchedulerTests(unittest.TestCase):
                  {"eligibleMatches": 4, "deletedMatches": 4, "deletedRows": {"matches": 4},
                   "durationMs": 100, "completed": True},
              ]):
-            scheduler.execute(self.config, self.now)
+            scheduler.execute(config, self.now)
             self.assertEqual(health.call_count, 2)
+            self.assertIn(scheduler.compose("stop", "backend"), [call.args[0] for call in run.call_args_list])
             state = json.loads((scheduler.STATE_DIR / "state.json").read_text())
             self.assertEqual(state["completedAt"], self.now.isoformat())
+
+    def test_online_success_never_stops_backend(self):
+        def fake_run(command, timeout=60):
+            return types.SimpleNamespace(returncode=0, stdout="container-id")
+
+        with patch.object(scheduler, "run", side_effect=fake_run) as run, \
+             patch.object(scheduler, "check_disk"), \
+             patch.object(scheduler, "backend_health") as health, \
+             patch.object(scheduler, "retention_run", side_effect=[
+                 {"eligibleMatches": 4, "retainedPatches": ["16.18"], "expiredVersions": ["16.10"]},
+                 {"eligibleMatches": 4, "deletedMatches": 4, "deletedRows": {"matches": 4},
+                  "durationMs": 100, "completed": True, "online": True},
+             ]) as retention:
+            scheduler.execute(self.config, self.now)
+            retention.assert_called_with(self.config, dry_run=False, disk_monitor=True)
+            commands = [call.args[0] for call in run.call_args_list]
+            self.assertNotIn(scheduler.compose("stop", "backend"), commands)
+            self.assertNotIn(scheduler.compose("up", "-d", "--no-deps", "backend"), commands)
+            self.assertEqual(health.call_count, 2)
+            self.assertFalse((scheduler.STATE_DIR / "restore-needed").exists())
+            state = json.loads((scheduler.STATE_DIR / "state.json").read_text())
+            self.assertEqual(state["completedAt"], self.now.isoformat())
+
+    def test_online_command_flags(self):
+        captured = {}
+
+        class FakeProcess:
+            returncode = 0
+
+            def __init__(self, command, stdout, **_):
+                captured["command"] = command
+                stdout.write('Data retention cleanup finished: {"eligibleMatches": 0}\n')
+
+            def poll(self):
+                return 0
+
+        with patch.object(scheduler.subprocess, "Popen", FakeProcess):
+            scheduler.retention_run(self.config, dry_run=False)
+        command = captured["command"]
+        for flag in ("DATA_RETENTION_ONLINE=true", "DATA_RETENTION_OFFLINE_ACK=false",
+                     "DATA_RETENTION_DELETE_ACK=true", "DATA_RETENTION_BATCH_SIZE=20",
+                     "DATA_RETENTION_BATCH_PAUSE=500ms", "DATA_RETENTION_WORK_LIMIT=2h"):
+            self.assertIn(flag, command)
+        with patch.object(scheduler.subprocess, "Popen", FakeProcess):
+            scheduler.retention_run(dict(self.config, RETENTION_MODE="offline"), dry_run=False)
+        for flag in ("DATA_RETENTION_ONLINE=false", "DATA_RETENTION_OFFLINE_ACK=true",
+                     "DATA_RETENTION_BATCH_SIZE=100", "DATA_RETENTION_WORK_LIMIT=10m"):
+            self.assertIn(flag, captured["command"])
+
+    def test_invalid_mode_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "RETENTION_MODE"):
+            scheduler.online_mode({"RETENTION_MODE": "fast"})
+        self.assertEqual(scheduler.setting_duration({"X": "500ms"}, "X", "1s"), "500ms")
+        with self.assertRaises(ValueError):
+            scheduler.setting_duration({"X": "1.5h"}, "X", "1s")
+
+    def test_due_run_tolerates_timer_drift(self):
+        scheduler.STATE_DIR.mkdir(exist_ok=True)
+        attempted = self.now.replace(second=3, microsecond=490000)
+        (scheduler.STATE_DIR / "state.json").write_text(
+            json.dumps({"attemptedAt": (attempted - scheduler.timedelta(hours=24)).isoformat(),
+                        "completedAt": (attempted - scheduler.timedelta(days=7)).isoformat()}),
+            encoding="utf-8",
+        )
+        with patch.object(scheduler, "check_disk"), \
+             patch.object(scheduler, "run", return_value=types.SimpleNamespace(returncode=0, stdout="id")), \
+             patch.object(scheduler, "backend_health"), \
+             patch.object(scheduler, "retention_run", return_value={
+                 "eligibleMatches": 0, "retainedPatches": ["16.18"], "expiredVersions": []
+             }) as retention:
+            scheduler.execute(self.config, self.now.replace(second=3, microsecond=400000))
+            retention.assert_called_once()
 
     def test_work_limit_alerts_and_keeps_retry_pending(self):
         def fake_run(command, timeout=60):

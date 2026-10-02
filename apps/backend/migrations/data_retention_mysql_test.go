@@ -100,6 +100,45 @@ func TestDataRetentionMySQLResumesAfterBatchFailure(t *testing.T) {
 	}
 }
 
+func TestDataRetentionMySQLOnlineRetriesLockConflicts(t *testing.T) {
+	ctx := context.Background()
+	database := openDataRetentionTestDatabase(t)
+	createDataRetentionFixture(t, database)
+	for index := 0; index < 15; index++ {
+		insertRetentionFixtureMatch(t, database, 5+index, fmt.Sprintf("KR-E%02d", index), "16.14.1")
+	}
+
+	// A concurrent API-style writer holds an expired match row longer than the online lock wait.
+	writer, err := database.BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.Exec(`SELECT match_id FROM matches WHERE match_id = 'KR-E12' FOR UPDATE`); err != nil {
+		t.Fatal(err)
+	}
+	released := make(chan struct{})
+	go func() {
+		defer close(released)
+		time.Sleep(7 * time.Second)
+		_ = writer.Rollback()
+	}()
+	t.Cleanup(func() { <-released })
+
+	result, err := CleanupRetainedData(ctx, database, DataRetentionOptions{
+		DryRun: false, DeleteAcknowledged: true, Online: true,
+		EnforceLoadGuard: true, MaxThreadsRunning: 100, MaxLockWaits: 100,
+		RetainedPatches: 3, BatchSize: 10, BatchPause: 10 * time.Millisecond,
+		BatchTimeout: time.Minute, WorkLimit: time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Online || result.EligibleMatches != 16 || result.DeletedMatches != 16 || !result.Completed || result.RetriedBatches < 1 {
+		t.Fatalf("unexpected online result: %+v", result)
+	}
+	assertRetentionFixtureCounts(t, database, 3, 3, 19)
+}
+
 func openDataRetentionTestDatabase(t *testing.T) *sqlx.DB {
 	t.Helper()
 	dsn := os.Getenv("TEAMGG_NUMERIC_KEY_MYSQL_TEST_DSN")

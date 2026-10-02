@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the existing retention command in a guarded, offline maintenance window."""
+"""Run the existing retention command in a guarded maintenance window, online by default."""
 
 import fcntl
 import json
@@ -49,9 +49,17 @@ def setting_int(config, key, fallback, minimum, maximum):
 
 def setting_duration(config, key, fallback):
     value = config.get(key, fallback)
-    if not value or value[-1] not in ("s", "m", "h") or not value[:-1].isdigit():
-        raise ValueError(f"{key} must be a Go duration using s, m, or h")
+    number = value[:-2] if value.endswith("ms") else value[:-1]
+    if not value or value[-1] not in ("s", "m", "h") or not number.isdigit():
+        raise ValueError(f"{key} must be a Go duration using ms, s, m, or h")
     return value
+
+
+def online_mode(config):
+    mode = config.get("RETENTION_MODE", "online").lower()
+    if mode not in ("online", "offline"):
+        raise ValueError("RETENTION_MODE must be online or offline")
+    return mode == "online"
 
 
 def in_window(now, start, end):
@@ -86,20 +94,23 @@ def read_result(output):
 
 
 def retention_run(config, dry_run, disk_monitor=False):
+    online = online_mode(config)
     flags = [
         "-e", f"DATA_RETENTION_DRY_RUN={'true' if dry_run else 'false'}",
         "-e", f"DATA_RETENTION_DELETE_ACK={'false' if dry_run else 'true'}",
-        "-e", f"DATA_RETENTION_OFFLINE_ACK={'false' if dry_run else 'true'}",
+        "-e", f"DATA_RETENTION_OFFLINE_ACK={'false' if dry_run or online else 'true'}",
+        "-e", f"DATA_RETENTION_ONLINE={'true' if online else 'false'}",
         "-e", "DATA_RETENTION_ENFORCE_LOAD_GUARD=true",
         "-e", f"DATA_RETENTION_MAX_THREADS_RUNNING={setting_int(config, 'RETENTION_MAX_THREADS_RUNNING', 4, 1, 100)}",
         "-e", f"DATA_RETENTION_MAX_LOCK_WAITS={setting_int(config, 'RETENTION_MAX_LOCK_WAITS', 0, 0, 100)}",
         "-e", f"DATA_RETENTION_MATCH_PATCHES={setting_int(config, 'RETENTION_MATCH_PATCHES', 8, 3, 30)}",
-        "-e", f"DATA_RETENTION_BATCH_SIZE={setting_int(config, 'RETENTION_BATCH_SIZE', 100, 10, 1000)}",
+        "-e", f"DATA_RETENTION_BATCH_SIZE={setting_int(config, 'RETENTION_BATCH_SIZE', 20 if online else 100, 10, 1000)}",
         "-e", f"DATA_RETENTION_BATCH_TIMEOUT={setting_duration(config, 'RETENTION_BATCH_TIMEOUT', '2m')}",
-        "-e", f"DATA_RETENTION_WORK_LIMIT={setting_duration(config, 'RETENTION_WORK_LIMIT', '10m')}",
+        "-e", f"DATA_RETENTION_BATCH_PAUSE={setting_duration(config, 'RETENTION_BATCH_PAUSE', '500ms' if online else '0s')}",
+        "-e", f"DATA_RETENTION_WORK_LIMIT={setting_duration(config, 'RETENTION_WORK_LIMIT', '2h' if online else '10m')}",
     ]
     command = compose("run", "--rm", "--no-deps", "--name", CONTAINER, *flags, "backend", "cleanup-retention")
-    timeout = setting_int(config, "RETENTION_COMMAND_TIMEOUT_MINUTES", 15, 2, 70) * 60
+    timeout = setting_int(config, "RETENTION_COMMAND_TIMEOUT_MINUTES", 135 if online else 15, 2, 200) * 60
     with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as output:
         process = subprocess.Popen(command, cwd=ROOT, stdout=output, stderr=subprocess.STDOUT, text=True)
         stop_reason = None
@@ -167,6 +178,15 @@ def alert(config, message):
         log("alert_failed", error=type(exc).__name__)
 
 
+def log_delete_result(result):
+    log("delete_result", online=result.get("online", False), eligibleMatches=result["eligibleMatches"],
+        deletedMatches=result["deletedMatches"], deletedRows=result.get("deletedRows", {}),
+        remainingMatches=max(0, result["eligibleMatches"] - result["deletedMatches"]),
+        durationMs=result["durationMs"], throttledWaits=result.get("throttledWaits", 0),
+        retriedBatches=result.get("retriedBatches", 0), completed=result["completed"],
+        stopReason="complete" if result["completed"] else "work_limit")
+
+
 def execute(config, now):
     if config.get("RETENTION_ENABLED", "false").lower() != "true":
         log("disabled")
@@ -194,8 +214,10 @@ def execute(config, now):
         state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
         interval = setting_int(config, "RETENTION_INTERVAL_DAYS", 7, 1, 365)
         retry = setting_int(config, "RETENTION_RETRY_HOURS", 24, 1, 168)
+        # Hourly timer starts drift by seconds; the slack keeps a due run in the window's first hour.
+        slack = timedelta(minutes=10)
         for key, delay in (("completedAt", timedelta(days=interval)), ("attemptedAt", timedelta(hours=retry))):
-            if state.get(key) and now < datetime.fromisoformat(state[key]) + delay:
+            if state.get(key) and now < datetime.fromisoformat(state[key]) + delay - slack:
                 log("not_due", reason=key)
                 return
         check_disk(config)
@@ -217,21 +239,23 @@ def execute(config, now):
             return
         check_disk(config)
 
-        # A stop command can partially succeed. The marker also survives process termination.
         result = None
-        (STATE_DIR / "restore-needed").touch()
-        try:
-            stopped = run(compose("stop", "backend"), timeout=120)
-            if stopped.returncode:
-                raise RuntimeError(f"backend stop failed: {stopped.stdout[-500:]}")
+        if online_mode(config):
+            # Online cleanup keeps the backend serving; short batches yield to API writers.
             result = retention_run(config, dry_run=False, disk_monitor=True)
-            log("delete_result", eligibleMatches=result["eligibleMatches"],
-                deletedMatches=result["deletedMatches"], deletedRows=result.get("deletedRows", {}),
-                remainingMatches=max(0, result["eligibleMatches"] - result["deletedMatches"]),
-                durationMs=result["durationMs"], completed=result["completed"],
-                stopReason="complete" if result["completed"] else "work_limit")
-        finally:
-            restore_backend_if_needed()
+            log_delete_result(result)
+            backend_health(timeout=30)
+        else:
+            # A stop command can partially succeed. The marker also survives process termination.
+            (STATE_DIR / "restore-needed").touch()
+            try:
+                stopped = run(compose("stop", "backend"), timeout=120)
+                if stopped.returncode:
+                    raise RuntimeError(f"backend stop failed: {stopped.stdout[-500:]}")
+                result = retention_run(config, dry_run=False, disk_monitor=True)
+                log_delete_result(result)
+            finally:
+                restore_backend_if_needed()
         if result and result["completed"]:
             state["completedAt"] = now.isoformat()
             state_path.write_text(json.dumps(state), encoding="utf-8")
