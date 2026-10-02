@@ -53,3 +53,14 @@ cron 패키지는 설치돼 있지 않아 systemd timer를 사용한다. timer�
 삭제 이후 백엔드 로그에서 15:31 KST에 숙련도 통계 수집의 `driver: bad connection` 1건을 확인했다. 5분 뒤 재시도하는 일시 오류로 삭제 작업과의 연관은 확인되지 않았다.
 
 실행당 약 2,500경기 처리 속도를 유지하면 잔여 분량은 약 8회의 야간 실행(회당 백엔드 중단 약 10분)이 더 필요하다.
+
+## 2026-10-02 18:14 KST 운영 DB 조치
+
+| 항목 | 결과 |
+|---|---|
+| buffer pool | `innodb_buffer_pool_size` 128MiB → 384MiB, `SET PERSIST` 온라인 확장 완료, 재시작 후에도 유지 |
+| 메모리 판단 | RAM 3.8GiB, 가용 약 2.1GiB, swap 2GiB 사용 중이라 1GiB 대신 384MiB로 제한 |
+| 영향 확인 | backend healthy, `/`·champion·meta-summary API 200, mysqld active |
+| 정리 | 과거 통합 테스트가 남긴 `teamgg_retention_test_*` 픽스처 DB 2개 삭제 |
+
+같은 MySQL 인스턴스를 `mips` 스키마가 함께 사용하므로 buffer pool 변경은 해당 스키마에도 적용된다.
