@@ -30,7 +30,7 @@
 | Index | Tag | Status | Date | Dependencies | Summary | Description |
 |---:|---|---|---|---|---|---|
 | 77 | unclassified | 🟢 DONE | 2026-09-04 12:23 | — | GPL-3.0 라이선스 적용 | 모노레포 루트에 GNU 공식 GPL v3 전문을 추가하고 README에 `GPL-3.0-only` 라이선스와 파일 링크를 명시했다. 공식 원문 완전 일치와 문서 링크를 검증했다. |
-| 76 | backend | 🟣 VFY | 2026-10-02 16:36 | #66 | 오래된 경기 자동 정리 | 최신 8개 패치를 보존하는 7일 간격 systemd timer를 운영에 활성화했다. dry-run·중복 실행 방지·백엔드 복구·디스크/DB 부하 제한과 로컬·운영 no-op 실행을 검증했다. 배치 중간 실패 후 롤백·재실행 MySQL 통합 테스트와 work limit 미완료 알림·웹훅 전송 테스트를 추가했다. 실제 만료 경기 삭제 및 알림 웹훅은 아직 검증되지 않아 VFY로 추적한다. |
+| 76 | backend | 🟣 VFY | 2026-10-02 16:47 | #66 | 오래된 경기 자동 정리 | 최신 8개 패치를 보존하는 7일 간격 systemd timer를 운영에 활성화했다. dry-run·중복 실행 방지·백엔드 복구·디스크/DB 부하 제한, 배치 중간 실패 후 롤백·재실행 MySQL 통합 테스트와 work limit 미완료 알림을 검증했다. 2026-10-02 03:00 KST 첫 실제 실행에서 21,433경기 중 2,500경기를 삭제하고 work limit으로 종료한 뒤 백엔드 healthy·API 200으로 복구됐다. 다음 창의 재개 실행과 웹훅 알림은 아직 검증되지 않아 VFY로 추적한다. |
 | 75 | backend | 🔴 TODO | 2026-09-02 02:41 | #65, #72, #74 | Legacy 문자열 키 제거 | 숫자 관계 전환과 룬 평탄화가 안정화된 뒤 중복 문자열 FK·인덱스·호환 trigger를 단계적으로 제거한다. 백업·rollback 승인, legacy 의존성 0건, 운영 회귀와 디스크 효과 검증을 완료 조건으로 한다. |
 | 74 | backend | 🟢 DONE | 2026-09-04 10:20 | #73 | Legacy 숙련도 제거 | 런타임과 통계 trigger를 numeric 전용으로 전환하고 legacy `masteries`를 제거했다. 실제 갱신과 주요 API를 검증했으며 루트 디스크 여유가 13GB에서 40GB로 증가했다. |
 | 73 | backend | 🟢 DONE | 2026-09-03 20:08 | #64 | 숙련도 numeric 직접 쓰기 | 운영 읽기·쓰기를 `masteries_numeric_v2`로 전환했다. 실제 Riot 갱신 표본의 양쪽 170행·checksum 일치와 4시간 무오류 운영, backend healthy 및 주요 API 200을 확인했다. |

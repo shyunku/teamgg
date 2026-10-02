@@ -36,3 +36,20 @@
 운영자 요청으로 기본 간격을 7일로 바꾸고 `a9fa34c`의 systemd service/timer를 설치했다. 운영 설정은 최신 8개 패치, KST 02:00~04:00, 최소 디스크 여유 20GiB, DB 실행 스레드 상한 8·락 대기 0, 배치 100건·2분 및 전체 10분 제한이다. `.env.retention`은 Git에 포함되지 않고 권한 600으로 보관한다.
 
 cron 패키지는 설치돼 있지 않아 systemd timer를 사용한다. timer는 활성화됐고 다음 확인 시각은 2026-09-24 18:00 KST이다. 창 밖 수동 실행에서 `outside_window`와 service 성공을 확인했다. 실행 계정 `ec2-user`의 Docker 그룹과 백엔드 재시작 후 healthy·API 200도 확인했다. 웹훅 주소가 없어 오류 알림은 현재 journal 확인만 가능하다. 실제 삭제는 대상이 생길 때 검증하며 #76은 `🟣 VFY`로 유지한다.
+
+## 2026-10-02 03:00 KST 첫 실제 삭제
+
+2026-10-02 16:47 KST에 journal, scheduler 상태, 서비스 상태를 읽기 전용으로 확인했다. 운영 호스트 checkout은 `02d832b`이다.
+
+| 항목 | 관측 |
+|---|---|
+| preview | 보존 16.12~16.19, 만료 16.10·16.11의 6개 full version, 대상 21,433경기 |
+| 삭제 | 2,500경기, 611초, `completed=false`, `stopReason=work_limit`, 잔여 18,933경기 |
+| 주요 삭제 행 | 참가자·상세·perks 각 28,024, perk style 56,048, perk selection 168,144, 밴 23,694, 팀 5,000, summoner_matches 2,696, DataExplorer 처리 상태 2,425 |
+| 복구 | 삭제 종료 18초 뒤 `backend_restored`; 확인 시점 backend healthy, `/`·champion·meta-summary API 200 |
+| 상태 파일 | `completedAt=2026-09-25 02:00`, `attemptedAt=2026-10-02 03:00`; 24시간 재시도 간격 뒤 재개 |
+| 디스크 | 루트 여유 36GiB (InnoDB 파일은 삭제만으로 줄지 않음) |
+
+삭제 이후 백엔드 로그에서 15:31 KST에 숙련도 통계 수집의 `driver: bad connection` 1건을 확인했다. 5분 뒤 재시도하는 일시 오류로 삭제 작업과의 연관은 확인되지 않았다.
+
+실행당 약 2,500경기 처리 속도를 유지하면 잔여 분량은 약 8회의 야간 실행(회당 백엔드 중단 약 10분)이 더 필요하다.
