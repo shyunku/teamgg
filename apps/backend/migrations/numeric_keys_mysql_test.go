@@ -165,7 +165,10 @@ func TestNumericKeyFoundationAndBackfillMySQL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Ready || !result.SummonersCompleted || !result.MatchesCompleted || !result.ParticipantsCompleted || !result.ChildrenCompleted {
+	// This fixture has no numeric mastery storage, so overall readiness must stay false even
+	// after every parent and child relation is backfilled. Mastery readiness is covered by
+	// TestMasteryNumericShadowMySQL.
+	if result.Ready || result.MasteriesReady || !result.SummonersCompleted || !result.MatchesCompleted || !result.ParticipantsCompleted || !result.ChildrenCompleted {
 		t.Fatalf("unexpected first backfill result: %+v", result)
 	}
 	var orphanSourceExists bool
@@ -266,7 +269,7 @@ func TestNumericKeyFoundationAndBackfillMySQL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !second.Ready || second.SummonersProcessed != 0 || second.MatchesProcessed != 0 || second.ParticipantsProcessed != 0 || second.ChildrenProcessed != 0 {
+	if second.Ready || !second.ChildrenCompleted || second.SummonersProcessed != 0 || second.MatchesProcessed != 0 || second.ParticipantsProcessed != 0 || second.ChildrenProcessed != 0 {
 		t.Fatalf("backfill was not idempotent: %+v", second)
 	}
 }
