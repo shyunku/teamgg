@@ -676,7 +676,10 @@ type numericKeyProgressStore interface {
 }
 
 func beginNumericKeyBackfillTransaction(ctx context.Context, database *sqlx.DB) (*sqlx.Tx, error) {
-	tx, err := database.BeginTxx(ctx, nil)
+	// READ COMMITTED matches application match saves. Under REPEATABLE READ the identity
+	// upserts take a gap lock at the end of the mapping primary keys, which blocks every new
+	// identity insert and deadlocks with concurrent match saves holding summoner identities.
+	tx, err := database.BeginTxx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return nil, err
 	}

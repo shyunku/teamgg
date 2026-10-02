@@ -2,98 +2,63 @@ package migrations
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	mysql "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
+	"team.gg-server/models"
 )
 
-func TestNumericKeyFoundationAndBackfillMySQL(t *testing.T) {
-	dsn := os.Getenv("TEAMGG_NUMERIC_KEY_MYSQL_TEST_DSN")
-	if dsn == "" && os.Getenv("TEAMGG_NUMERIC_KEY_MYSQL_TEST_FROM_DB_ENV") == "true" {
-		config := mysql.NewConfig()
-		config.User = os.Getenv("DB_USER")
-		config.Passwd = os.Getenv("DB_PASSWORD")
-		config.Net = "tcp"
-		config.Addr = os.Getenv("DB_HOST") + ":" + os.Getenv("DB_PORT")
-		config.ParseTime = true
-		config.MultiStatements = true
-		dsn = config.FormatDSN()
-	}
-	if dsn == "" {
-		t.Skip("TEAMGG_NUMERIC_KEY_MYSQL_TEST_DSN is not set")
-	}
-	config, err := mysql.ParseDSN(dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	config.DBName = ""
-	admin, err := sqlx.Open("mysql", config.FormatDSN())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = admin.Close() })
-	if err := pingNumericKeyTestDatabase(ctx, admin, 30*time.Second); err != nil {
-		t.Fatal(err)
-	}
-	testDatabase := fmt.Sprintf("teamgg_numeric_key_test_%d", time.Now().UnixNano())
-	if _, err := admin.ExecContext(ctx, "CREATE DATABASE `"+testDatabase+"`"); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if _, err := admin.Exec("DROP DATABASE IF EXISTS `" + testDatabase + "`"); err != nil {
-			t.Error(err)
-		}
-	})
-	config.DBName = testDatabase
-	database, err := sqlx.Open("mysql", config.FormatDSN())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := database.PingContext(ctx); err != nil {
-		t.Fatal(err)
-	}
+// numericKeyFixtureSchema is the legacy string-keyed schema before the numeric key foundation.
+var numericKeyFixtureSchema = []string{
+	`CREATE TABLE summoners (puuid VARCHAR(255) NOT NULL PRIMARY KEY) ENGINE=InnoDB`,
+	`CREATE TABLE matches (match_id VARCHAR(255) NOT NULL PRIMARY KEY) ENGINE=InnoDB`,
+	`CREATE TABLE match_participants (
+		match_id VARCHAR(255) NOT NULL,
+		participant_id INT NOT NULL,
+		match_participant_id VARCHAR(255) NOT NULL,
+		puuid VARCHAR(255) NOT NULL,
+		PRIMARY KEY (match_id, participant_id)
+	) ENGINE=InnoDB`,
+	`CREATE TABLE masteries (puuid VARCHAR(255) NOT NULL, champion_id INT NOT NULL, PRIMARY KEY (puuid, champion_id)) ENGINE=InnoDB`,
+	`CREATE TABLE leagues (puuid VARCHAR(255) NOT NULL, league_id VARCHAR(64) NOT NULL, queue_type VARCHAR(64) NOT NULL, PRIMARY KEY (puuid, league_id, queue_type)) ENGINE=InnoDB`,
+	`CREATE TABLE summoner_matches (puuid VARCHAR(255) NOT NULL, match_id VARCHAR(255) NOT NULL, PRIMARY KEY (puuid, match_id)) ENGINE=InnoDB`,
+	`CREATE TABLE match_participant_details (match_participant_id VARCHAR(255) NOT NULL PRIMARY KEY, match_id VARCHAR(255) NOT NULL) ENGINE=InnoDB`,
+	`CREATE TABLE match_participant_perks (match_participant_id VARCHAR(255) NOT NULL PRIMARY KEY) ENGINE=InnoDB`,
+	`CREATE TABLE match_participant_perk_styles (match_participant_id VARCHAR(255) NOT NULL, style_id VARCHAR(64) NOT NULL) ENGINE=InnoDB`,
+	`CREATE TABLE match_teams (match_id VARCHAR(255) NOT NULL, team_id INT NOT NULL, PRIMARY KEY (match_id, team_id)) ENGINE=InnoDB`,
+	`CREATE TABLE match_team_bans (match_id VARCHAR(255) NOT NULL, team_id INT NOT NULL, champion_id INT NOT NULL, pick_turn INT NOT NULL) ENGINE=InnoDB`,
+	`CREATE TABLE data_explorer_summoner_jobs (
+		puuid VARCHAR(255) NOT NULL, status VARCHAR(16) NOT NULL, priority INT NOT NULL,
+		depth INT NOT NULL, attempts INT NOT NULL, next_attempt_at DATETIME(6) NOT NULL,
+		lease_until DATETIME(6) NULL, discovered_from_match_id VARCHAR(255) NULL,
+		last_error TEXT NULL, created_at DATETIME(6) NOT NULL, updated_at DATETIME(6) NOT NULL,
+		PRIMARY KEY (puuid), KEY data_explorer_summoner_jobs_claim_index (status, next_attempt_at, priority, created_at),
+		KEY data_explorer_summoner_jobs_lease_index (status, lease_until)
+	) ENGINE=InnoDB`,
+	`CREATE TABLE data_explorer_match_jobs (
+		match_id VARCHAR(255) NOT NULL, status VARCHAR(16) NOT NULL, priority INT NOT NULL,
+		depth INT NOT NULL, attempts INT NOT NULL, next_attempt_at DATETIME(6) NOT NULL,
+		lease_until DATETIME(6) NULL, last_error TEXT NULL, created_at DATETIME(6) NOT NULL,
+		updated_at DATETIME(6) NOT NULL, PRIMARY KEY (match_id),
+		KEY data_explorer_match_jobs_claim_index (status, next_attempt_at, priority, created_at),
+		KEY data_explorer_match_jobs_lease_index (status, lease_until)
+	) ENGINE=InnoDB`,
+}
 
-	statements := []string{
-		`CREATE TABLE summoners (puuid VARCHAR(255) NOT NULL PRIMARY KEY) ENGINE=InnoDB`,
-		`CREATE TABLE matches (match_id VARCHAR(255) NOT NULL PRIMARY KEY) ENGINE=InnoDB`,
-		`CREATE TABLE match_participants (
-			match_id VARCHAR(255) NOT NULL,
-			participant_id INT NOT NULL,
-			match_participant_id VARCHAR(255) NOT NULL,
-			puuid VARCHAR(255) NOT NULL,
-			PRIMARY KEY (match_id, participant_id)
-		) ENGINE=InnoDB`,
-		`CREATE TABLE masteries (puuid VARCHAR(255) NOT NULL, champion_id INT NOT NULL, PRIMARY KEY (puuid, champion_id)) ENGINE=InnoDB`,
-		`CREATE TABLE leagues (puuid VARCHAR(255) NOT NULL, league_id VARCHAR(64) NOT NULL, queue_type VARCHAR(64) NOT NULL, PRIMARY KEY (puuid, league_id, queue_type)) ENGINE=InnoDB`,
-		`CREATE TABLE summoner_matches (puuid VARCHAR(255) NOT NULL, match_id VARCHAR(255) NOT NULL, PRIMARY KEY (puuid, match_id)) ENGINE=InnoDB`,
-		`CREATE TABLE match_participant_details (match_participant_id VARCHAR(255) NOT NULL PRIMARY KEY, match_id VARCHAR(255) NOT NULL) ENGINE=InnoDB`,
-		`CREATE TABLE match_participant_perks (match_participant_id VARCHAR(255) NOT NULL PRIMARY KEY) ENGINE=InnoDB`,
-		`CREATE TABLE match_participant_perk_styles (match_participant_id VARCHAR(255) NOT NULL, style_id VARCHAR(64) NOT NULL) ENGINE=InnoDB`,
-		`CREATE TABLE match_teams (match_id VARCHAR(255) NOT NULL, team_id INT NOT NULL, PRIMARY KEY (match_id, team_id)) ENGINE=InnoDB`,
-		`CREATE TABLE match_team_bans (match_id VARCHAR(255) NOT NULL, team_id INT NOT NULL, champion_id INT NOT NULL, pick_turn INT NOT NULL) ENGINE=InnoDB`,
-		`CREATE TABLE data_explorer_summoner_jobs (
-			puuid VARCHAR(255) NOT NULL, status VARCHAR(16) NOT NULL, priority INT NOT NULL,
-			depth INT NOT NULL, attempts INT NOT NULL, next_attempt_at DATETIME(6) NOT NULL,
-			lease_until DATETIME(6) NULL, discovered_from_match_id VARCHAR(255) NULL,
-			last_error TEXT NULL, created_at DATETIME(6) NOT NULL, updated_at DATETIME(6) NOT NULL,
-			PRIMARY KEY (puuid), KEY data_explorer_summoner_jobs_claim_index (status, next_attempt_at, priority, created_at),
-			KEY data_explorer_summoner_jobs_lease_index (status, lease_until)
-		) ENGINE=InnoDB`,
-		`CREATE TABLE data_explorer_match_jobs (
-			match_id VARCHAR(255) NOT NULL, status VARCHAR(16) NOT NULL, priority INT NOT NULL,
-			depth INT NOT NULL, attempts INT NOT NULL, next_attempt_at DATETIME(6) NOT NULL,
-			lease_until DATETIME(6) NULL, last_error TEXT NULL, created_at DATETIME(6) NOT NULL,
-			updated_at DATETIME(6) NOT NULL, PRIMARY KEY (match_id),
-			KEY data_explorer_match_jobs_claim_index (status, next_attempt_at, priority, created_at),
-			KEY data_explorer_match_jobs_lease_index (status, lease_until)
-		) ENGINE=InnoDB`,
+func TestNumericKeyFoundationAndBackfillMySQL(t *testing.T) {
+	ctx := context.Background()
+	database := openNumericKeyTestDatabase(t)
+
+	statements := append(append([]string{}, numericKeyFixtureSchema...),
 		`INSERT INTO summoners (puuid) VALUES ('legacy-puuid')`,
 		`INSERT INTO matches (match_id) VALUES ('KR_legacy')`,
 		`INSERT INTO match_participants
@@ -110,7 +75,7 @@ func TestNumericKeyFoundationAndBackfillMySQL(t *testing.T) {
 		`INSERT INTO match_participant_perk_styles VALUES ('legacy-participant', 'primary'), ('legacy-participant', 'secondary')`,
 		`INSERT INTO match_teams VALUES ('KR_legacy', 100)`,
 		`INSERT INTO match_team_bans VALUES ('KR_legacy', 100, 1, 1)`,
-	}
+	)
 	for _, statement := range statements {
 		if _, err := database.ExecContext(ctx, statement); err != nil {
 			t.Fatal(err)
@@ -272,6 +237,245 @@ func TestNumericKeyFoundationAndBackfillMySQL(t *testing.T) {
 	if second.Ready || !second.ChildrenCompleted || second.SummonersProcessed != 0 || second.MatchesProcessed != 0 || second.ParticipantsProcessed != 0 || second.ChildrenProcessed != 0 {
 		t.Fatalf("backfill was not idempotent: %+v", second)
 	}
+}
+
+// TestNumericKeyParticipantBackfillConcurrentWritesMySQL runs the participant backfill while
+// application-style match saves reserve the same PUUID identities, as an online run would.
+func TestNumericKeyParticipantBackfillConcurrentWritesMySQL(t *testing.T) {
+	ctx := context.Background()
+	database := openNumericKeyTestDatabase(t)
+	for _, statement := range numericKeyFixtureSchema {
+		if _, err := database.ExecContext(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	legacyMatches := 3000
+	if configured := os.Getenv("TEAMGG_NUMERIC_KEY_CONCURRENCY_MATCHES"); configured != "" {
+		parsed, err := strconv.Atoi(configured)
+		if err != nil || parsed < 100 || parsed > 200000 {
+			t.Fatalf("invalid TEAMGG_NUMERIC_KEY_CONCURRENCY_MATCHES %q", configured)
+		}
+		legacyMatches = parsed
+	}
+	const summonerPool = 2000
+	puuid := func(index int) string { return fmt.Sprintf("puuid-%06d", index%summonerPool) }
+	for start := 0; start < summonerPool; start += 500 {
+		values := make([]string, 0, 500)
+		for index := start; index < start+500 && index < summonerPool; index++ {
+			values = append(values, fmt.Sprintf("('%s')", puuid(index)))
+		}
+		if _, err := database.ExecContext(ctx, "INSERT INTO summoners (puuid) VALUES "+strings.Join(values, ",")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Legacy rows are inserted before the foundation triggers exist, so their numeric keys are NULL.
+	for start := 0; start < legacyMatches; start += 200 {
+		matchValues := make([]string, 0, 200)
+		participantValues := make([]string, 0, 2000)
+		for match := start; match < start+200 && match < legacyMatches; match++ {
+			matchId := fmt.Sprintf("KR_%010d", match)
+			matchValues = append(matchValues, fmt.Sprintf("('%s')", matchId))
+			for slot := 1; slot <= 10; slot++ {
+				participantValues = append(participantValues, fmt.Sprintf(
+					"('%s', %d, '%s-%d', '%s')", matchId, slot, matchId, slot, puuid(match*7+slot*131),
+				))
+			}
+		}
+		if _, err := database.ExecContext(ctx, "INSERT INTO matches (match_id) VALUES "+strings.Join(matchValues, ",")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := database.ExecContext(ctx,
+			"INSERT INTO match_participants (match_id, participant_id, match_participant_id, puuid) VALUES "+
+				strings.Join(participantValues, ","),
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := applyNumericKeyFoundation(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+	if err := applyNumericKeyChildren(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+
+	var (
+		writerMutex   sync.Mutex
+		writerSaves   int
+		writerRetries int
+		writerErrors  []error
+	)
+	stopWriters := make(chan struct{})
+	var writers sync.WaitGroup
+	for writer := 0; writer < 4; writer++ {
+		writers.Add(1)
+		go func(writer int) {
+			defer writers.Done()
+			for sequence := 0; ; sequence++ {
+				select {
+				case <-stopWriters:
+					return
+				default:
+				}
+				matchId := fmt.Sprintf("KR_9%d%08d", writer, sequence)
+				puuids := make([]string, 0, 11)
+				for slot := 1; slot <= 10; slot++ {
+					puuids = append(puuids, puuid(writer*997+sequence*13+slot*131))
+				}
+				// New PUUIDs land between existing keys and exercise unique-index gap locks.
+				puuids[9] = fmt.Sprintf("puuid-%06d-new-%d-%d", (writer*997+sequence*13)%summonerPool, writer, sequence)
+				retries, err := saveConcurrentTestMatch(ctx, database, matchId, puuids)
+				writerMutex.Lock()
+				writerRetries += retries
+				if err != nil {
+					writerErrors = append(writerErrors, err)
+				} else {
+					writerSaves++
+				}
+				writerMutex.Unlock()
+			}
+		}(writer)
+	}
+
+	started := time.Now()
+	var backfillRuns, backfillLockErrors int
+	var processed int64
+	for {
+		result, err := BackfillNumericKeys(ctx, database, NumericKeyBackfillOptions{
+			BatchSize: 500,
+			WorkLimit: 2 * time.Second,
+		})
+		backfillRuns++
+		if err != nil {
+			if !isRetentionLockConflict(err) || backfillLockErrors >= 20 {
+				close(stopWriters)
+				writers.Wait()
+				t.Fatalf("participant backfill failed after %d runs: %v", backfillRuns, err)
+			}
+			// A failed batch is rolled back; an operator rerun resumes from the stored cursor.
+			backfillLockErrors++
+			continue
+		}
+		processed += result.ParticipantsProcessed
+		if result.ParticipantsCompleted {
+			break
+		}
+		if time.Since(started) > 5*time.Minute {
+			close(stopWriters)
+			writers.Wait()
+			t.Fatalf("participant backfill did not finish: %+v", result)
+		}
+	}
+	elapsed := time.Since(started)
+	close(stopWriters)
+	writers.Wait()
+
+	writerMutex.Lock()
+	defer writerMutex.Unlock()
+	t.Logf(
+		"legacyParticipants=%d processed=%d elapsed=%s backfillRuns=%d backfillLockErrors=%d writerSaves=%d writerRetries=%d writerErrors=%d",
+		legacyMatches*10, processed, elapsed, backfillRuns, backfillLockErrors, writerSaves, writerRetries, len(writerErrors),
+	)
+	if len(writerErrors) > 0 {
+		t.Fatalf("application-style saves failed after retries: first=%v", writerErrors[0])
+	}
+	if writerSaves == 0 {
+		t.Fatal("concurrent writers did not overlap the backfill")
+	}
+	ready, err := validateNumericKeyBackfill(ctx, database)
+	if err != nil || !ready {
+		t.Fatalf("participant numeric keys are inconsistent after concurrent backfill: ready=%t err=%v", ready, err)
+	}
+}
+
+// saveConcurrentTestMatch mirrors SaveDataExplorerMatch: a READ COMMITTED transaction that reserves
+// sorted identities, inserts the match and participants, and retries lock conflicts.
+func saveConcurrentTestMatch(ctx context.Context, database *sqlx.DB, matchId string, puuids []string) (int, error) {
+	const maxAttempts = 5
+	for attempt := 0; ; attempt++ {
+		err := func() error {
+			tx, err := database.BeginTxx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+			if err != nil {
+				return err
+			}
+			defer func() { _ = tx.Rollback() }()
+			if err := models.ReserveMatchNumericKeys(tx, matchId, puuids); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO matches (match_id) VALUES (?)`, matchId); err != nil {
+				return err
+			}
+			for slot, participantPuuid := range puuids {
+				if _, err := tx.ExecContext(ctx, `
+					INSERT INTO match_participants (match_id, participant_id, match_participant_id, puuid)
+					VALUES (?, ?, ?, ?)
+				`, matchId, slot+1, fmt.Sprintf("%s-%d", matchId, slot+1), participantPuuid); err != nil {
+					return err
+				}
+			}
+			return tx.Commit()
+		}()
+		if err == nil {
+			return attempt, nil
+		}
+		var mysqlErr *mysql.MySQLError
+		retryable := errors.As(err, &mysqlErr) && (mysqlErr.Number == 1205 || mysqlErr.Number == 1213 || mysqlErr.Number == 1062)
+		if !retryable || attempt == maxAttempts-1 {
+			return attempt, err
+		}
+		time.Sleep(time.Duration(50*(1<<attempt)) * time.Millisecond)
+	}
+}
+
+func openNumericKeyTestDatabase(t *testing.T) *sqlx.DB {
+	t.Helper()
+	dsn := os.Getenv("TEAMGG_NUMERIC_KEY_MYSQL_TEST_DSN")
+	if dsn == "" && os.Getenv("TEAMGG_NUMERIC_KEY_MYSQL_TEST_FROM_DB_ENV") == "true" {
+		config := mysql.NewConfig()
+		config.User = os.Getenv("DB_USER")
+		config.Passwd = os.Getenv("DB_PASSWORD")
+		config.Net = "tcp"
+		config.Addr = os.Getenv("DB_HOST") + ":" + os.Getenv("DB_PORT")
+		config.ParseTime = true
+		config.MultiStatements = true
+		dsn = config.FormatDSN()
+	}
+	if dsn == "" {
+		t.Skip("TEAMGG_NUMERIC_KEY_MYSQL_TEST_DSN is not set")
+	}
+	config, err := mysql.ParseDSN(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	config.DBName = ""
+	admin, err := sqlx.Open("mysql", config.FormatDSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = admin.Close() })
+	if err := pingNumericKeyTestDatabase(ctx, admin, 30*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	testDatabase := fmt.Sprintf("teamgg_numeric_key_test_%d", time.Now().UnixNano())
+	if _, err := admin.ExecContext(ctx, "CREATE DATABASE `"+testDatabase+"`"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := admin.Exec("DROP DATABASE IF EXISTS `" + testDatabase + "`"); err != nil {
+			t.Error(err)
+		}
+	})
+	config.DBName = testDatabase
+	database, err := sqlx.Open("mysql", config.FormatDSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := database.PingContext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	return database
 }
 
 func mysqlExplainString(value interface{}) string {
