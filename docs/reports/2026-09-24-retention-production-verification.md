@@ -76,3 +76,7 @@ cron 패키지는 설치돼 있지 않아 systemd timer를 사용한다. timer�
 | 서비스 | 실행 구간 오류는 숙련도 통계 `driver: bad connection` 1건(전날 삭제 없는 시간에도 발생), backend healthy 유지 |
 | 디스크 | 루트 여유 35GiB |
 | 상태 파일 | `completedAt=2026-10-03 03:00`; 다음 실행은 7일 뒤 |
+
+## 2026-10-03 16:03 KST 운영 알림 검증
+
+Discord 웹훅(`/slack` 호환 주소)을 `.env.retention`에 설정하고 `52b913d`(명시적 User-Agent)를 서버에 반영했다. 운영 호스트에서 직접 POST와 스케줄러 `alert()`로 테스트 알림을 보내 HTTP 200을 확인했다. #76을 DONE 처리했다.

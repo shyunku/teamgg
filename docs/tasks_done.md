@@ -7,6 +7,7 @@
 | Index | Tag | Status | Date | Dependencies | Summary | Description |
 |---:|---|---|---|---|---|---|
 | 77 | unclassified | 🟢 DONE | 2026-09-04 12:23 | — | GPL-3.0 라이선스 적용 | 모노레포 루트에 GNU 공식 GPL v3 전문을 추가하고 README에 `GPL-3.0-only` 라이선스와 파일 링크를 명시했다. 공식 원문 완전 일치와 문서 링크를 검증했다. |
+| 76 | backend | 🟢 DONE | 2026-10-03 | #66 | 오래된 경기 자동 정리 | 최신 8개 패치를 보존하는 7일 간격 systemd timer를 운영에 활성화했다. 첫 offline 실행이 2,500경기에서 work limit으로 멈춘 뒤, 128MiB buffer pool 병목 분석을 거쳐 백엔드 무중단 online 모드(READ COMMITTED 짧은 배치, 락 충돌 재시도, 새벽 2시간)를 기본으로 전환했다. 2026-10-03 03:00 online 실행에서 남은 18,933경기를 46분 만에 중단·재시도 없이 모두 삭제했다. Discord 웹훅 실패·미완료 알림을 운영에서 테스트 전송으로 검증했다. |
 | 74 | backend | 🟢 DONE | 2026-09-04 10:20 | #73 | Legacy 숙련도 제거 | 런타임과 통계 trigger를 numeric 전용으로 전환하고 legacy `masteries`를 제거했다. 실제 갱신과 주요 API를 검증했으며 루트 디스크 여유가 13GB에서 40GB로 증가했다. |
 | 73 | backend | 🟢 DONE | 2026-09-03 20:08 | #64 | 숙련도 numeric 직접 쓰기 | 운영 읽기·쓰기를 `masteries_numeric_v2`로 전환했다. 실제 Riot 갱신 표본의 양쪽 170행·checksum 일치와 4시간 무오류 운영, backend healthy 및 주요 API 200을 확인했다. |
 | 69 | backend | 🟢 DONE | 2026-08-21 | #67 | DB 용량 임계값 단위 지원 | `DATA_EXPLORER_ALERT_DATABASE_BYTES`가 기존 정수 바이트 값과 함께 `5G`, `200M`, `1.5TB` 같은 사람이 읽기 쉬운 1024 기반 용량 단위를 지원하도록 파서·테스트·운영 문서를 개선했다. 잘못된 값과 범위 초과 값은 안전하게 기본값으로 복귀하며, 단위 테스트와 백엔드 전체 테스트·빌드를 통과했다. |
