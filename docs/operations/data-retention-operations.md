@@ -87,7 +87,7 @@ Numeric match and participant identity mappings are retained. They are migration
 
 ## Optional host scheduler (#76)
 
-The host-side scheduler is disabled by default. It runs the existing cleanup command, not a second deletion implementation. It needs Python 3.9+ on the Linux Docker host. Copy [the configuration template](../../../.env.retention.example) to the ignored root `.env.retention` and set the host path containing the MySQL data volume. Never put deletion acknowledgements into the backend's normal environment file.
+The host-side scheduler is disabled by default. It runs the existing cleanup command, not a second deletion implementation. It needs Python 3.9+ on the Linux Docker host. Copy [the configuration template](../../.env.retention.example) to the ignored root `.env.retention` and set the host path containing the MySQL data volume. Never put deletion acknowledgements into the backend's normal environment file.
 
 On the EC2 host, install the systemd units after creating the ignored root `.env.retention` with both enable switches set to `true`:
 

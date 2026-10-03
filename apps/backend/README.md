@@ -143,9 +143,9 @@ Set a `DATA_EXPLORER_*_BUDGET` variable to `0` only when an uncapped daily budge
 Successful jobs persist `last_processed_at` and `next_eligible_at` in separate processing-state tables. Queue insertion checks this state, so removing completed queue rows does not immediately enqueue the same relationship graph again. The default revisit windows are 30 days for summoners and 365 days for immutable matches. Existing `done` jobs are copied to these tables through restart-safe primary-key cursors in the same small batch size; this state backfill runs even while deletion is disabled.
 
 Completed-job cleanup is disabled by default because it deletes database rows. After confirming the retention policy, set `DATA_EXPLORER_CLEANUP_ENABLED=true` to remove only `done` summoner/match jobs and completed match-source rows in batches. The default batch is 500 rows per table every 30 seconds, with 24-hour retention. Pending, processing, and failed jobs are never deleted by this cleanup. Safety bounds cap the batch at 5,000 rows, enforce a minimum five-second cleanup interval and one-hour retention, and prevent either revisit interval from being shorter than 24 hours.
-Operational metrics are emitted as parseable `key=value` logs independently of `DATA_EXPLORER_DEBUG`. See [DataExplorer operations](docs/data-explorer-operations.md) for metric semantics, alert thresholds, migration instructions, and a production budget-sizing procedure.
+Operational metrics are emitted as parseable `key=value` logs independently of `DATA_EXPLORER_DEBUG`. See [DataExplorer operations](../../docs/operations/data-explorer-operations.md) for metric semantics, alert thresholds, migration instructions, and a production budget-sizing procedure.
 
-Raw match retention is an explicit maintenance operation. `cleanup-retention` keeps the latest eight short patch versions by default and deletes older match graphs in child-to-parent batches. The command defaults to dry-run; deletion requires both `DATA_RETENTION_DELETE_ACK=true` and `DATA_RETENTION_OFFLINE_ACK=true` after backend writes have stopped. Invalid or empty game versions are retained rather than guessed. See [Data retention operations](docs/data-retention-operations.md) for the deletion order, environment variables, rollout, and rollback boundaries.
+Raw match retention is an explicit maintenance operation. `cleanup-retention` keeps the latest eight short patch versions by default and deletes older match graphs in child-to-parent batches. The command defaults to dry-run; deletion requires both `DATA_RETENTION_DELETE_ACK=true` and `DATA_RETENTION_OFFLINE_ACK=true` after backend writes have stopped. Invalid or empty game versions are retained rather than guessed. See [Data retention operations](../../docs/operations/data-retention-operations.md) for the deletion order, environment variables, rollout, and rollback boundaries.
 
 
 Statistics timing values use Go duration syntax, such as `30s`, `5m`, and `12h`. Each statistics job uses a different initial delay so that database aggregation jobs do not all start at once during server startup. `STATISTICS_LOCK_RETRY_DELAY` controls the short retry interval used when another statistics job holds the lock, while `STATISTICS_RETRY_DELAY` controls retries after an actual collection error. When multiple server instances are running, MySQL advisory locks and the shared `statistics_snapshots` cache prevent duplicate aggregation work.
@@ -203,10 +203,10 @@ during a low-traffic maintenance window.
 
 The mastery statistics migration replaces the global mastery-table aggregation with
 a dirty-champion materialized aggregate. See [Incremental mastery statistics
-operations](docs/mastery-statistics-operations.md) for rollout and verification.
+operations](../../docs/operations/mastery-statistics-operations.md) for rollout and verification.
 
 The Champion Detail and meta collector uses one recent-patch staging table instead
-of 24 explicit temporary tables. See [Champion Detail statistics operations](docs/champion-detail-statistics-operations.md) for rollout and performance
+of 24 explicit temporary tables. See [Champion Detail statistics operations](../../docs/operations/champion-detail-statistics-operations.md) for rollout and performance
 verification.
 
 ### 4. Run the Development Server

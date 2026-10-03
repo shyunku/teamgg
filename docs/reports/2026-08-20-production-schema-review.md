@@ -30,7 +30,7 @@
 - 최근 경기 3개 조회
 - 각 경기 참가자 전원을 다시 소환자 탐색 큐에 추가
 
-관련 코드는 [data_explorer.go](/home/ec2-user/workspace/teamgg/apps/backend/service/data_explorer.go:315)와 [core.go](/home/ec2-user/workspace/teamgg/apps/backend/service/core.go:376)에 있습니다.
+관련 코드는 [data_explorer.go](../../apps/backend/service/data_explorer.go:315)와 [core.go](../../apps/backend/service/core.go:376)에 있습니다.
 
 `depth` 컬럼은 저장되지만 최대 깊이를 검사하는 코드가 없습니다. 결과적으로:
 
@@ -69,8 +69,8 @@
 
 `match_participant_id`와 `style_id`는 매번 36자리 UUID로 생성됩니다.
 
-- 참가자 UUID 생성: [core.go](/home/ec2-user/workspace/teamgg/apps/backend/service/core.go:291)
-- 스타일 UUID 생성: [core.go](/home/ec2-user/workspace/teamgg/apps/backend/service/core.go:448)
+- 참가자 UUID 생성: [core.go](../../apps/backend/service/core.go:291)
+- 스타일 UUID 생성: [core.go](../../apps/backend/service/core.go:448)
 
 이 UUID가 참가자 상세, 룬, 룬 스타일, 룬 선택과 각 인덱스에 반복됩니다.
 
@@ -117,7 +117,7 @@ masteries
 
 이 변경만으로 `masteries`에서 수 GB를 줄일 수 있습니다. `champion_id`가 `BIGINT`인 것도 과도하며 `SMALLINT UNSIGNED`면 충분합니다.
 
-또한 숙련도 갱신은 API가 반환한 모든 챔피언을 개별 UPSERT합니다. [mastery.go](/home/ec2-user/workspace/teamgg/apps/backend/models/mastery.go:20) 현재는 삭제 정책이 없어 플레이어와 챔피언 조합이 계속 누적됩니다.
+또한 숙련도 갱신은 API가 반환한 모든 챔피언을 개별 UPSERT합니다. [mastery.go](../../apps/backend/models/mastery.go:20) 현재는 삭제 정책이 없어 플레이어와 챔피언 조합이 계속 누적됩니다.
 
 ## 4. 인덱스 낭비
 
@@ -128,7 +128,7 @@ MySQL이 2026-03-24에 시작된 이후 사용 횟수를 확인한 결과:
 - `match_participants(team_position)`: 0회, 약 314MB
 - `match_participants(champion_id)`: 0회, 약 280MB
 
-특히 `description`은 `primaryStyle`과 `subStyle` 정도의 저선택도 값이며, 실제 통계 코드는 전체 데이터를 임시 테이블에 옮긴 다음 CASE 문으로 사용합니다. [champion_detail_statistics_meta.go](/home/ec2-user/workspace/teamgg/apps/backend/models/mixed/statistics_models/champion_detail_statistics_meta.go:77)
+특히 `description`은 `primaryStyle`과 `subStyle` 정도의 저선택도 값이며, 실제 통계 코드는 전체 데이터를 임시 테이블에 옮긴 다음 CASE 문으로 사용합니다. [champion_detail_statistics_meta.go](../../apps/backend/models/mixed/statistics_models/champion_detail_statistics_meta.go:77)
 
 따라서 `description` 인덱스는 우선 삭제 후보입니다. 나머지도 쿼리 실행 계획을 최종 검증한 뒤 제거하면 약 800MB 이상 추가 절감할 수 있습니다.
 
@@ -136,7 +136,7 @@ MySQL이 2026-03-24에 시작된 이후 사용 횟수를 확인한 결과:
 
 ### 룬 선택 테이블
 
-[scheme.ddl](/home/ec2-user/workspace/teamgg/apps/backend/scheme.ddl:161)의 `match_participant_perk_style_selections`에는 PK가 없습니다.
+[scheme.ddl](../../apps/backend/scheme.ddl:161)의 `match_participant_perk_style_selections`에는 PK가 없습니다.
 
 그 결과:
 
@@ -147,15 +147,15 @@ MySQL이 2026-03-24에 시작된 이후 사용 횟수를 확인한 결과:
 
 ### `summoner_matches`
 
-저장소의 DDL에는 `(puuid, match_id)` PK가 있지만 [scheme.ddl](/home/ec2-user/workspace/teamgg/apps/backend/scheme.ddl:376), 운영 DB에는 실제 PK가 없습니다. 전용 마이그레이션은 존재하지만 [20260720_add_data_explorer_queue.sql](/home/ec2-user/workspace/teamgg/apps/backend/migrations/20260720_add_data_explorer_queue.sql:7) 적용되지 않은 상태로 보입니다.
+저장소의 DDL에는 `(puuid, match_id)` PK가 있지만 [scheme.ddl](../../apps/backend/scheme.ddl:376), 운영 DB에는 실제 PK가 없습니다. 전용 마이그레이션은 존재하지만 [20260720_add_data_explorer_queue.sql](../../apps/backend/migrations/20260720_add_data_explorer_queue.sql:7) 적용되지 않은 상태로 보입니다.
 
-코드는 `NOT EXISTS`로 중복을 우회하지만 [summoner_match.go](/home/ec2-user/workspace/teamgg/apps/backend/models/summoner_match.go:14), 동시 요청에서는 중복이 생길 수 있습니다.
+코드는 `NOT EXISTS`로 중복을 우회하지만 [summoner_match.go](../../apps/backend/models/summoner_match.go:14), 동시 요청에서는 중복이 생길 수 있습니다.
 
 이는 코드 DDL과 실제 운영 스키마가 어긋난 상태이므로, 스키마 버전 관리 도입이 필요합니다.
 
 ## 6. 완료된 DataExplorer 작업을 영구 보관
 
-작업 완료 시 행을 삭제하지 않고 `status='done'`으로만 변경합니다. [data_explorer_job.go](/home/ec2-user/workspace/teamgg/apps/backend/models/data_explorer_job.go:346)
+작업 완료 시 행을 삭제하지 않고 `status='done'`으로만 변경합니다. [data_explorer_job.go](../../apps/backend/models/data_explorer_job.go:346)
 
 현재:
 
@@ -169,7 +169,7 @@ MySQL이 2026-03-24에 시작된 이후 사용 횟수를 확인한 결과:
 
 ## 7. 통계 집계가 임시 공간과 DB 부하를 크게 발생
 
-점검 시 숙련도 통계 쿼리가 약 **83분째 실행 중**이었습니다. 이 작업은 2,900만 개 숙련도 행을 12시간마다 전부 집계합니다. [mastery_statistics.go](/home/ec2-user/workspace/teamgg/apps/backend/models/mixed/statistics_models/mastery_statistics.go:20)
+점검 시 숙련도 통계 쿼리가 약 **83분째 실행 중**이었습니다. 이 작업은 2,900만 개 숙련도 행을 12시간마다 전부 집계합니다. [mastery_statistics.go](../../apps/backend/models/mixed/statistics_models/mastery_statistics.go:20)
 
 현재 인덱스에는 `champion_level`이 없어 집계 중 클러스터 레코드 조회가 대량 발생합니다. 다음과 같은 커버링 인덱스 또는 증분 집계가 필요합니다.
 
@@ -177,7 +177,7 @@ MySQL이 2026-03-24에 시작된 이후 사용 횟수를 확인한 결과:
 (champion_id, champion_points DESC, champion_level)
 ```
 
-Champion Detail 통계는 여러 단계의 `CREATE TEMPORARY TABLE ... SELECT`와 정렬·윈도 함수를 실행합니다. [champion_detail_statistics_meta.go](/home/ec2-user/workspace/teamgg/apps/backend/models/mixed/statistics_models/champion_detail_statistics_meta.go:17) 이 작업들이 7.8GB InnoDB 임시 공간의 주원인입니다.
+Champion Detail 통계는 여러 단계의 `CREATE TEMPORARY TABLE ... SELECT`와 정렬·윈도 함수를 실행합니다. [champion_detail_statistics_meta.go](../../apps/backend/models/mixed/statistics_models/champion_detail_statistics_meta.go:17) 이 작업들이 7.8GB InnoDB 임시 공간의 주원인입니다.
 
 임시 공간은 MySQL 재시작으로 축소할 수 있지만, 쿼리를 바꾸지 않으면 다시 커집니다.
 
