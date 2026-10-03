@@ -32,7 +32,7 @@
 | 76 | backend | 🟣 VFY | 2026-10-03 15:25 | #66 | 오래된 경기 자동 정리 | 최신 8개 패치를 보존하는 7일 간격 systemd timer를 운영에 활성화했다. 첫 offline 실행이 2,500경기에서 work limit으로 멈춘 뒤, 128MiB buffer pool 병목 분석을 거쳐 백엔드 무중단 online 모드(READ COMMITTED 짧은 배치, 락 충돌 재시도, 새벽 2시간)를 기본으로 전환했다. 2026-10-03 03:00 online 실행에서 남은 18,933경기를 46분 만에 중단·재시도 없이 모두 삭제했다. 웹훅 미설정으로 운영 알림 경로만 미검증이라 VFY로 추적한다. |
 | 75 | backend | 🔴 TODO | 2026-09-02 02:41 | #65, #72, #74 | Legacy 문자열 키 제거 | 숫자 관계 전환과 룬 평탄화가 안정화된 뒤 중복 문자열 FK·인덱스·호환 trigger를 단계적으로 제거한다. 백업·rollback 승인, legacy 의존성 0건, 운영 회귀와 디스크 효과 검증을 완료 조건으로 한다. |
 | 72 | backend | 🔴 TODO | 2026-09-02 02:41 | #71 | 숫자 관계 읽기 전환 | 백필된 관계에 필수 숫자 인덱스·FK를 적용하고 API·DataExplorer·통계를 숫자 JOIN으로 전환한다. 결과 일치, EXPLAIN·성능, rollback과 운영 회귀를 검증한다. |
-| 71 | backend | 🔴 TODO | 2026-09-02 02:41 | #70 | 하위 관계 숫자 키 백필 | Participant를 참조하는 룬·스탯·밴·팀 등 하위 테이블의 숫자 FK를 제한 배치로 채우고 NULL·고아 참조 0건과 재실행 안전성을 검증한다. |
+| 71 | backend | 🔴 TODO | 2026-10-03 15:55 | #70 | 하위 관계 숫자 키 백필 | Participant를 참조하는 스탯·밴·팀 등 하위 테이블의 숫자 FK를 제한 배치로 채우고 NULL·고아 참조 0건과 재실행 안전성을 검증한다. 룬 테이블(perks·perk_styles)은 #65 평탄화에서 숫자 키 구조로 바로 옮기므로 제외한다. |
 | 70 | backend | 🟡 WIP | 2026-10-02 18:51 | #64, #74 | Participant 숫자 키 백필 | `match_participants` 전체의 participant PK, match FK, summoner FK를 재시작 가능한 제한 배치로 완료한다. 사전 조사로 잔여 약 700만 행·예상 75분·디스크 약 6.6GB를 추정했다. 백엔드 무중단 실행 시 REPEATABLE READ gap lock으로 경기 저장과 교착하는 문제를 로컬 동시 쓰기 테스트로 발견해 READ COMMITTED로 수정했다. 운영 배포 후 제한 실행, 전체 정합성, 처리량·binlog·디스크 증가량 검증이 남았다. |
 | 65 | backend | 🔴 TODO | 2026-09-02 02:41 | #72 | 룬 스키마 평탄화 | 숫자 participant 관계를 기반으로 룬 데이터를 참가자당 고정 컬럼 또는 단일 `participant_perks` 행으로 평탄화하고 이중 쓰기·백필·검증·읽기 전환을 수행한다. |
 | 52 | frontend | 🔴 TODO | 2026-08-08 | #37, #39 | 프론트 Docker 스모크 테스트 | Docker Desktop 환경에서 development 프로필의 프론트엔드 빌드·기동·기본 화면 smoke test를 수행한다. |

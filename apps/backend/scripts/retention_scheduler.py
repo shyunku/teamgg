@@ -170,8 +170,11 @@ def alert(config, message):
     if not url:
         return
     import urllib.request
+    # Discord rejects urllib's default User-Agent; Discord URLs need the Slack-compatible "/slack" suffix.
     request = urllib.request.Request(url, data=json.dumps({"text": message}).encode(),
-                                     headers={"Content-Type": "application/json"}, method="POST")
+                                     headers={"Content-Type": "application/json",
+                                              "User-Agent": "teamgg-retention-scheduler/1.0"},
+                                     method="POST")
     try:
         urllib.request.urlopen(request, timeout=5).close()
     except Exception as exc:

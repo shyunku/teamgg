@@ -253,7 +253,7 @@ class RetentionSchedulerTests(unittest.TestCase):
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_POST(self):
                 body = self.rfile.read(int(self.headers["Content-Length"]))
-                received.append((self.headers["Content-Type"], json.loads(body)))
+                received.append((self.headers["Content-Type"], self.headers["User-Agent"], json.loads(body)))
                 self.send_response(200)
                 self.end_headers()
 
@@ -269,7 +269,8 @@ class RetentionSchedulerTests(unittest.TestCase):
             thread.join(timeout=5)
         finally:
             server.server_close()
-        self.assertEqual(received, [("application/json", {"text": "retention failed"})])
+        self.assertEqual(received, [("application/json", "teamgg-retention-scheduler/1.0",
+                                     {"text": "retention failed"})])
 
     def test_alert_failure_is_logged_without_raising(self):
         with patch.object(scheduler, "log") as log:
