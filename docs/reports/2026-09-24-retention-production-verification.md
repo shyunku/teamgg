@@ -64,3 +64,15 @@ cron 패키지는 설치돼 있지 않아 systemd timer를 사용한다. timer�
 | 정리 | 과거 통합 테스트가 남긴 `teamgg_retention_test_*` 픽스처 DB 2개 삭제 |
 
 같은 MySQL 인스턴스를 `mips` 스키마가 함께 사용하므로 buffer pool 변경은 해당 스키마에도 적용된다.
+
+## 2026-10-03 03:00 KST 첫 online 실행
+
+| 항목 | 관측 |
+|---|---|
+| 대상 | 전날 남은 18,933경기 (16.10·16.11의 5개 full version) |
+| 결과 | 18,933경기 전부 삭제, `completed=true`, 2,786초(약 46분), 분당 약 408경기 |
+| 안전장치 | `throttledWaits=0`, `retriedBatches=0`, 백엔드 중단 없음 |
+| 주요 삭제 행 | 참가자·상세·perks 각 217,962, perk style 435,924, perk selection 1,307,772, 밴 185,222, 팀 37,866, summoner_matches 20,795 |
+| 서비스 | 실행 구간 오류는 숙련도 통계 `driver: bad connection` 1건(전날 삭제 없는 시간에도 발생), backend healthy 유지 |
+| 디스크 | 루트 여유 35GiB |
+| 상태 파일 | `completedAt=2026-10-03 03:00`; 다음 실행은 7일 뒤 |
