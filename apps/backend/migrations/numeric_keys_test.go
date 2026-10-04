@@ -46,6 +46,15 @@ func TestNumericKeyBackfillWorkLimitBounds(t *testing.T) {
 	}
 }
 
+func TestNumericKeyBackfillStopAfterParticipantsEnvironment(t *testing.T) {
+	for value, expected := range map[string]bool{"": false, "false": false, "true": true, "TRUE": true, "1": false} {
+		t.Setenv("NUMERIC_KEY_BACKFILL_STOP_AFTER_PARTICIPANTS", value)
+		if got := NumericKeyBackfillOptionsFromEnvironment().StopAfterParticipants; got != expected {
+			t.Fatalf("%q: got %t, want %t", value, got, expected)
+		}
+	}
+}
+
 func TestNumericKeyTriggersCoverEveryParentWrite(t *testing.T) {
 	triggers := numericKeyTriggers()
 	if len(triggers) != len(numericKeyTriggerNames) {

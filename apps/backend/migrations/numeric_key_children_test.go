@@ -66,8 +66,7 @@ func TestNumericKeyChildTriggersDualWriteInsertAndUpdate(t *testing.T) {
 func TestNumericKeyChildBackfillSpecsAreBoundedAndOrdered(t *testing.T) {
 	expected := []string{
 		"leagues", "summoner_matches", "match_teams", "match_team_bans",
-		"match_participant_details", "match_participant_perks",
-		"match_participant_perk_styles",
+		"match_participant_details",
 	}
 	specs := numericKeyChildBackfillSpecs()
 	if len(specs) != len(expected) {

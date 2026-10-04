@@ -26,6 +26,9 @@ var numericKeyTriggerNames = []string{
 type NumericKeyBackfillOptions struct {
 	BatchSize int
 	WorkLimit time.Duration
+	// StopAfterParticipants ends the run once the participant stage completes, before the
+	// parent validation scan and the child relation stage.
+	StopAfterParticipants bool
 }
 
 type NumericKeyBackfillResult struct {
@@ -260,6 +263,9 @@ func NumericKeyBackfillOptionsFromEnvironment() NumericKeyBackfillOptions {
 	return NumericKeyBackfillOptions{
 		BatchSize: boundedNumericKeyBatchSize(os.Getenv("NUMERIC_KEY_BACKFILL_BATCH_SIZE")),
 		WorkLimit: boundedNumericKeyWorkLimit(os.Getenv("NUMERIC_KEY_BACKFILL_WORK_LIMIT")),
+		StopAfterParticipants: strings.EqualFold(
+			strings.TrimSpace(os.Getenv("NUMERIC_KEY_BACKFILL_STOP_AFTER_PARTICIPANTS")), "true",
+		),
 	}
 }
 
@@ -315,7 +321,7 @@ func BackfillNumericKeys(ctx context.Context, database *sqlx.DB, options Numeric
 	result.ParticipantsCompleted, result.ParticipantsProcessed, err = backfillParticipantNumericKeys(
 		ctx, database, deadline, options.BatchSize,
 	)
-	if err != nil || !result.ParticipantsCompleted {
+	if err != nil || !result.ParticipantsCompleted || options.StopAfterParticipants {
 		return result, err
 	}
 

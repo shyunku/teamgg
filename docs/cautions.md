@@ -12,7 +12,7 @@
 
 - `cleanup-retention`, `backfill-numeric-keys` 같은 유지보수 명령은 `docker compose run`으로 새 컨테이너에서 실행되므로 `docker compose build backend` 뒤에는 실행 중인 백엔드를 재시작하지 않아도 새 코드가 적용된다. 컨테이너의 `unhealthy` 표시는 HTTP 헬스체크가 붙은 이미지 때문이며 무시해도 된다.
 - 오래된 경기 정리는 7일마다 KST 02:00~04:00에 시작해 최대 2시간 실행된다. 대량 백필이나 DDL은 이 시간과 겹치지 않게 한다.
-- `backfill-numeric-keys`는 참가자 단계가 끝나면 같은 실행에서 하위 관계(#71) 단계로 자동 진행한다. #71 범위 조정 전에는 참가자 완료 시점에 실행을 멈춘다.
+- `backfill-numeric-keys`는 참가자 단계가 끝나면 같은 실행에서 하위 관계(#71) 단계로 자동 진행한다. 참가자 단계만 돌리려면 `NUMERIC_KEY_BACKFILL_STOP_AFTER_PARTICIPANTS=true`를 준다(해당 코드가 배포된 이미지 기준).
 - 대량 작업은 work limit을 두고 나눠 실행하며, 디스크 여유·락 대기·API 응답을 함께 관측한다.
 
 ## 원격 작업

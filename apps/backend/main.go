@@ -118,8 +118,8 @@ func main() {
 	if numericKeyBackfillOnly {
 		options := migrations.NumericKeyBackfillOptionsFromEnvironment()
 		log.Infof(
-			"Numeric key backfill starting: batchSize=%d workLimit=%s",
-			options.BatchSize, options.WorkLimit,
+			"Numeric key backfill starting: batchSize=%d workLimit=%s stopAfterParticipants=%t",
+			options.BatchSize, options.WorkLimit, options.StopAfterParticipants,
 		)
 		result, backfillErr := migrations.BackfillNumericKeys(ctx, db.Root.DB, options)
 		if backfillErr != nil {

@@ -25,6 +25,9 @@ type numericKeyChildBackfillSpec struct {
 	updateJoin    string
 }
 
+// numericKeyChildBackfillSpecs excludes the rune tables. Their existing rows move to the
+// flattened participant-keyed rune structure (#65) instead of an in-place UPDATE; new rows
+// still receive numeric keys from the dual-write triggers.
 func numericKeyChildBackfillSpecs() []numericKeyChildBackfillSpec {
 	return []numericKeyChildBackfillSpec{
 		{
@@ -53,16 +56,6 @@ func numericKeyChildBackfillSpecs() []numericKeyChildBackfillSpec {
 			updateJoin: `INNER JOIN match_participant_numeric_keys participant_key ON participant_key.legacy_match_participant_id = source.match_participant_id
 				INNER JOIN match_numeric_keys match_key ON match_key.riot_match_id = source.match_id
 				SET source.match_participant_fk = participant_key.match_participant_id, source.match_fk = match_key.match_id`,
-		},
-		{
-			entity: "match_participant_perks", legacyColumn: "match_participant_id", numericColumn: "match_participant_fk", table: "match_participant_perks",
-			updateJoin: `INNER JOIN match_participant_numeric_keys numeric_key ON numeric_key.legacy_match_participant_id = source.match_participant_id
-				SET source.match_participant_fk = numeric_key.match_participant_id`,
-		},
-		{
-			entity: "match_participant_perk_styles", legacyColumn: "match_participant_id", numericColumn: "match_participant_fk", table: "match_participant_perk_styles",
-			updateJoin: `INNER JOIN match_participant_numeric_keys numeric_key ON numeric_key.legacy_match_participant_id = source.match_participant_id
-				SET source.match_participant_fk = numeric_key.match_participant_id`,
 		},
 	}
 }
@@ -218,8 +211,6 @@ func validateNumericKeyChildrenBackfill(ctx context.Context, database *sqlx.DB) 
 		`SELECT EXISTS(SELECT 1 FROM leagues source LEFT JOIN summoner_numeric_keys numeric_key ON numeric_key.puuid = source.puuid WHERE source.summoner_fk IS NULL OR numeric_key.summoner_id IS NULL OR source.summoner_fk <> numeric_key.summoner_id LIMIT 1)`,
 		`SELECT EXISTS(SELECT 1 FROM summoner_matches source LEFT JOIN summoner_numeric_keys summoner_key ON summoner_key.puuid = source.puuid LEFT JOIN match_numeric_keys match_key ON match_key.riot_match_id = source.match_id WHERE source.summoner_fk IS NULL OR source.match_fk IS NULL OR summoner_key.summoner_id IS NULL OR match_key.match_id IS NULL OR source.summoner_fk <> summoner_key.summoner_id OR source.match_fk <> match_key.match_id LIMIT 1)`,
 		`SELECT EXISTS(SELECT 1 FROM match_participant_details source LEFT JOIN match_participant_numeric_keys participant_key ON participant_key.legacy_match_participant_id = source.match_participant_id LEFT JOIN match_numeric_keys match_key ON match_key.riot_match_id = source.match_id WHERE source.match_participant_fk IS NULL OR source.match_fk IS NULL OR participant_key.match_participant_id IS NULL OR match_key.match_id IS NULL OR source.match_participant_fk <> participant_key.match_participant_id OR source.match_fk <> match_key.match_id LIMIT 1)`,
-		`SELECT EXISTS(SELECT 1 FROM match_participant_perks source LEFT JOIN match_participant_numeric_keys numeric_key ON numeric_key.legacy_match_participant_id = source.match_participant_id WHERE source.match_participant_fk IS NULL OR numeric_key.match_participant_id IS NULL OR source.match_participant_fk <> numeric_key.match_participant_id LIMIT 1)`,
-		`SELECT EXISTS(SELECT 1 FROM match_participant_perk_styles source LEFT JOIN match_participant_numeric_keys numeric_key ON numeric_key.legacy_match_participant_id = source.match_participant_id WHERE source.match_participant_fk IS NULL OR numeric_key.match_participant_id IS NULL OR source.match_participant_fk <> numeric_key.match_participant_id LIMIT 1)`,
 		`SELECT EXISTS(SELECT 1 FROM match_teams source LEFT JOIN match_numeric_keys numeric_key ON numeric_key.riot_match_id = source.match_id WHERE source.match_fk IS NULL OR numeric_key.match_id IS NULL OR source.match_fk <> numeric_key.match_id LIMIT 1)`,
 		`SELECT EXISTS(SELECT 1 FROM match_team_bans source LEFT JOIN match_numeric_keys numeric_key ON numeric_key.riot_match_id = source.match_id WHERE source.match_fk IS NULL OR numeric_key.match_id IS NULL OR source.match_fk <> numeric_key.match_id LIMIT 1)`,
 	}

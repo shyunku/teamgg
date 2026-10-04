@@ -123,12 +123,41 @@ func TestNumericKeyFoundationAndBackfillMySQL(t *testing.T) {
 			t.Fatalf("%s claim plan is not ordered by %s: key=%q extra=%q", query.name, query.indexName, key, extra)
 		}
 	}
+	participantsOnly, err := BackfillNumericKeys(ctx, database, NumericKeyBackfillOptions{
+		BatchSize: 10, WorkLimit: 5 * time.Second, StopAfterParticipants: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !participantsOnly.ParticipantsCompleted || participantsOnly.ChildrenCompleted || participantsOnly.ChildrenProcessed != 0 || participantsOnly.Ready {
+		t.Fatalf("participant-only backfill entered the child stage: %+v", participantsOnly)
+	}
+	var childProgressRows int
+	if err := database.GetContext(ctx, &childProgressRows, `SELECT COUNT(*) FROM numeric_key_child_backfill_progress`); err != nil {
+		t.Fatal(err)
+	}
+	if childProgressRows != 0 {
+		t.Fatalf("participant-only backfill wrote child progress: rows=%d", childProgressRows)
+	}
+	var unkeyedPerks int
+	if err := database.GetContext(ctx, &unkeyedPerks, `SELECT COUNT(*) FROM match_participant_perks WHERE match_participant_fk IS NULL`); err != nil {
+		t.Fatal(err)
+	}
+
 	result, err := BackfillNumericKeys(ctx, database, NumericKeyBackfillOptions{
 		BatchSize: 10,
 		WorkLimit: 5 * time.Second,
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	// Rune tables are left to the #65 flattening, so legacy rune rows keep NULL numeric keys.
+	var unkeyedPerksAfter int
+	if err := database.GetContext(ctx, &unkeyedPerksAfter, `SELECT COUNT(*) FROM match_participant_perks WHERE match_participant_fk IS NULL`); err != nil {
+		t.Fatal(err)
+	}
+	if unkeyedPerks == 0 || unkeyedPerksAfter != unkeyedPerks {
+		t.Fatalf("child backfill touched rune rows: before=%d after=%d", unkeyedPerks, unkeyedPerksAfter)
 	}
 	// This fixture has no numeric mastery storage, so overall readiness must stay false even
 	// after every parent and child relation is backfilled. Mastery readiness is covered by
