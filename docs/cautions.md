@@ -6,6 +6,7 @@
 - InnoDB buffer pool은 384MiB(`SET PERSIST`)다. 서버 RAM이 3.8GiB이고 swap을 이미 쓰고 있어 더 늘리기 전에 메모리 여유를 확인한다.
 - binlog 보존 기간은 24시간이다. 시점 복구(PITR) 가능 범위도 24시간이다.
 - 대량 쓰기 작업은 binlog와 InnoDB 내부 공간을 늘린다. 실행 전 루트 디스크 여유가 12GiB 안전선보다 충분히 높은지 확인한다. 행 `DELETE`로 생긴 공간은 테이블 내부에서 재사용될 뿐 OS 디스크 여유를 바로 늘리지 않는다.
+- 숫자 identity 테이블의 식별자 컬럼(`puuid`, `riot_match_id` 등)은 ascii_bin이고 원본 테이블은 utf8mb4라 서로 JOIN하면 조인 순서에 따라 실행 계획이 크게 달라진다. 운영에서 대량 조회·수정 전에 `EXPLAIN FORMAT=TREE`로 해시 조인 또는 인덱스 조인인지 확인한다.
 - MySQL 통합 테스트는 격리된 로컬 인스턴스에서만 실행한다. 운영 DB 접속정보(`TEAMGG_NUMERIC_KEY_MYSQL_TEST_FROM_DB_ENV`)로 실행하면 테스트 DB가 운영 인스턴스에 남을 수 있다.
 
 ## 유지보수 명령

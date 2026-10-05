@@ -20,7 +20,7 @@
 
 ## 추천 작업 순서
 
-`#70, #71, #72, #65, #75, #42, #51, #50, #52, #49, #44, #45, #46, #47, #48`
+`#71, #72, #65, #75, #42, #51, #50, #52, #49, #44, #45, #46, #47, #48`
 
 ## 작업 목록
 
@@ -29,7 +29,6 @@
 | [75](tasks/075.md) | backend | 2026-09-02 02:41 | 🔴 TODO |  | #65, #72, #74 | 숫자 관계 전환 뒤 남는 중복 문자열 FK·인덱스·호환 trigger를 단계적으로 제거한다. | 백업·rollback 승인, legacy 의존성 0건, 제거 후 운영 회귀 없음, 디스크 절감 효과가 측정된다. |
 | [72](tasks/072.md) | backend | 2026-09-02 02:41 | 🔴 TODO |  | #71 | 백필된 숫자 관계로 API·DataExplorer·통계 읽기를 전환한다. | 필수 숫자 인덱스·FK가 적용되고 숫자 JOIN 결과가 문자열 JOIN과 일치하며, EXPLAIN·성능과 rollback 절차, 운영 회귀 없음이 검증된다. |
 | [71](tasks/071.md) | backend | 2026-10-04 15:30 | 🟡 WIP |  | #70 | 참가자를 참조하는 하위 테이블(스탯·밴·팀·`summoner_matches` 등)의 숫자 FK를 백필한다. 룬 테이블은 #65에서 처리한다. | 범위 내 하위 테이블 숫자 FK NULL 0건, 고아 참조 0건과 legacy/숫자 관계 일치, 제한 배치·cursor 재실행 안전성, 운영 오류·deadlock·API 회귀 없음이 확인된다. |
-| [70](tasks/070.md) | backend | 2026-10-03 17:09 | 🟡 WIP |  | #64, #74 | 기존 `match_participants` 행의 participant PK·match FK·summoner FK를 백엔드 무중단으로 채운다. | 전체 대상 숫자 키 NULL 0건, legacy와 숫자 관계 전체 일치, 오류·deadlock 없이 cursor 완료, 디스크 12GiB 안전선과 API health 유지, 처리량·binlog·디스크 증가량이 기록된다. |
 | [65](tasks/065.md) | backend | 2026-10-03 15:55 | 🔴 TODO |  | #72 | 룬 데이터를 숫자 참가자 키 기반 참가자당 한 행 구조로 평탄화한다. | 이중 쓰기·백필·결과 일치 검증 후 읽기가 새 구조로 전환되고, 기존 룬 테이블 대비 디스크 효과와 운영 회귀 없음이 확인된다. |
 | [52](tasks/052.md) | frontend | 2026-08-08 | 🔴 TODO |  | #37, #39 | 프론트엔드 Docker development 프로필을 smoke test한다. | Docker Desktop에서 프론트엔드 빌드·기동과 기본 화면 응답이 확인된다. |
 | [51](tasks/051.md) | backend | 2026-08-08 | 🔴 TODO |  | #37, #40 | 백엔드 Docker 이미지를 smoke test한다. | Docker Desktop에서 백엔드 빌드·기동과 health·주요 API 응답이 확인된다. |

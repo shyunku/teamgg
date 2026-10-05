@@ -4,7 +4,7 @@
 
 목표는 참가자 계열 테이블의 긴 문자열 PK·FK·보조 인덱스를 숫자 키로 바꿔 디스크와 I/O를 줄이는 것이다. 숙련도 테이블에서 같은 전환으로 약 25GB가 5GB로 줄었다. 세부 설계는 [numeric-key-schema-v2](plans/numeric-key-schema-v2.md)를 따른다.
 
-1. **#70 참가자 숫자 키 백필**: 기존 `match_participants` 행의 participant PK·match FK·summoner FK를 백엔드 무중단으로 채우고 전체 정합성을 검증한다.
+1. **#70 참가자 숫자 키 백필** (완료 2026-10-05): 기존 `match_participants` 행의 숫자 키를 백엔드 무중단으로 채우고 전체 정합성을 검증했다.
 2. **#71 하위 관계 백필**: 스탯·밴·팀·`summoner_matches` 등 하위 테이블의 숫자 FK를 채운다. 룬 테이블은 제외한다.
 3. **#72 숫자 관계 읽기 전환**: 필수 숫자 인덱스·FK를 적용하고 API·DataExplorer·통계를 숫자 JOIN으로 전환한다.
 4. **#65 룬 평탄화**: 룬 테이블을 숫자 참가자 키 기반 참가자당 한 행 구조로 옮긴다.
