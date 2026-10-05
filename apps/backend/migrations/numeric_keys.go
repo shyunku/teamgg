@@ -385,10 +385,14 @@ func backfillSimpleNumericKeys(
 		if err != nil {
 			return false, processedThisRun, err
 		}
+		// The duplicate branch must not touch the identity column: VALUES(id) is the
+		// auto-increment value this insert would have generated, so assigning it renumbered
+		// identities already handed out by triggers and left participants pointing at
+		// identities that no longer existed (#70).
 		insertQuery, insertArgs, err := sqlx.In(
 			fmt.Sprintf(
 				`INSERT INTO %s (%s) SELECT %s FROM %s WHERE %s IN (?) ON DUPLICATE KEY UPDATE %s = VALUES(%s)`,
-				keyTable, keyLegacyColumn, legacyColumn, sourceTable, legacyColumn, keyNumericColumn, keyNumericColumn,
+				keyTable, keyLegacyColumn, legacyColumn, sourceTable, legacyColumn, keyLegacyColumn, keyLegacyColumn,
 			),
 			keys,
 		)
@@ -747,6 +751,14 @@ func validateNumericKeyBackfill(ctx context.Context, database *sqlx.DB) (bool, e
 		    OR source.match_participant_pk <> numeric_key.match_participant_id
 		    OR source.match_fk <> numeric_key.match_id
 		    OR source.summoner_fk <> numeric_key.summoner_id`,
+		// The participant mapping can agree with the participant row while both hold an identity
+		// that no longer belongs to the Riot identifier, so check the identity tables directly.
+		`SELECT COUNT(*) FROM match_participants source
+		 LEFT JOIN summoner_numeric_keys summoner_key ON summoner_key.puuid = source.puuid
+		 WHERE summoner_key.summoner_id IS NULL OR source.summoner_fk <> summoner_key.summoner_id`,
+		`SELECT COUNT(*) FROM match_participants source
+		 LEFT JOIN match_numeric_keys match_key ON match_key.riot_match_id = source.match_id
+		 WHERE match_key.match_id IS NULL OR source.match_fk <> match_key.match_id`,
 	}
 	for _, query := range checks {
 		var count int64
